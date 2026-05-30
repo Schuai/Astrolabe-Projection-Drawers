@@ -2,6 +2,52 @@
 
 Generate horizon projection SVGs with `pixi`.
 
+## Install
+
+This project uses `pixi` to manage Python and the project environment. The `pixi.toml` in this repository currently targets `win-64`, so the setup below is intended for Windows.
+
+1. Install `pixi`.
+
+   In PowerShell, run:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -c "irm -useb https://pixi.sh/install.ps1 | iex"
+   ```
+
+   Then restart your terminal so the updated `PATH` takes effect.
+
+2. Create the project environment.
+
+   In this repository folder, run:
+
+   ```powershell
+   pixi install
+   ```
+
+   This reads `pixi.toml`, installs the required Python version, and creates the local project environment.
+
+3. Run commands through `pixi`.
+
+   You can run the scripts without manually activating anything:
+
+   ```powershell
+   pixi run draw-azimuthal-equidistant -- --help
+   pixi run draw-stereographic -- --help
+   ```
+
+   `pixi run` will use the environment defined by this project. If the environment has not been installed yet, `pixi run` can install it automatically.
+
+4. Optional: open a shell inside the project environment.
+
+   ```powershell
+   pixi shell
+   ```
+
+Official pixi docs:
+
+- Installation: https://pixi.prefix.dev/latest/installation/
+- `pixi install`: https://pixi.prefix.dev/latest/reference/cli/pixi/install/
+
 ## Azimuthal Equidistant
 
 Use `draw_azimuthal_equidistant.py` through the `draw-azimuthal-equidistant` task:
