@@ -1,0 +1,12 @@
+[workspace]
+name = "geared-astrolabe"
+version = "0.1.0"
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[dependencies]
+python = ">=3.12,<3.14"
+
+[tasks]
+draw-azimuthal-equidistant = "python draw_azimuthal_equidistant.py"
+draw-stereographic = "python draw_stereographic.py"

@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Pixi local environment
+.pixi/
+
+# Generated test/output SVGs
+*_test.svg
+*_repro.svg
+*_fix.svg
+stereographic.svg
+azimuthal_equidistant.svg
+azimuthal_equidistant_*.svg
+crosshair_*.svg
+sample.svg
+Darmstadt.svg
+
+# Large local artifacts
+*.png
+*.pdf
+
+# Local editor/OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
