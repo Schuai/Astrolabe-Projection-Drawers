@@ -15,6 +15,8 @@ azimuthal_equidistant_*.svg
 crosshair_*.svg
 sample.svg
 Darmstadt.svg
+!examples/azimuthal_equidistant.svg
+!examples/stereographic.svg
 
 # Large local artifacts
 *.png

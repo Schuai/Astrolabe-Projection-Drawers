@@ -2,11 +2,20 @@
 
 Generate horizon projection SVGs with `pixi`.
 
-## Install
+## Setup
 
 This project uses `pixi` to manage Python and the project environment. The `pixi.toml` in this repository currently targets `win-64`, so the setup below is intended for Windows.
 
-1. Install `pixi`.
+1. Clone this repository and enter the project directory.
+
+   In PowerShell, run:
+
+   ```powershell
+   git clone https://github.com/Schuai/Astrolabe-Projection-Drawers.git
+   cd programs
+   ```
+
+2. Install `pixi`.
 
    In PowerShell, run:
 
@@ -16,7 +25,7 @@ This project uses `pixi` to manage Python and the project environment. The `pixi
 
    Then restart your terminal so the updated `PATH` takes effect.
 
-2. Create the project environment.
+3. Create the project environment.
 
    In this repository folder, run:
 
@@ -26,7 +35,7 @@ This project uses `pixi` to manage Python and the project environment. The `pixi
 
    This reads `pixi.toml`, installs the required Python version, and creates the local project environment.
 
-3. Run commands through `pixi`.
+4. Run commands through `pixi`.
 
    You can run the scripts without manually activating anything:
 
@@ -37,7 +46,7 @@ This project uses `pixi` to manage Python and the project environment. The `pixi
 
    `pixi run` will use the environment defined by this project. If the environment has not been installed yet, `pixi run` can install it automatically.
 
-4. Optional: open a shell inside the project environment.
+5. Optional: open a shell inside the project environment.
 
    ```powershell
    pixi shell
@@ -54,7 +63,7 @@ Use `draw_azimuthal_equidistant.py` through the `draw-azimuthal-equidistant` tas
 
 ```powershell
 pixi run draw-azimuthal-equidistant -- @(
-  "--latitude", "49.86667",
+  "--latitude", "35",
   "--center", "north",
   "--range-latitude", "-55",
   "--diameter", "40",
@@ -71,6 +80,18 @@ pixi run draw-azimuthal-equidistant -- @(
   "--twilight-style", "dashed",
   "--equator-tropics",
   "--equator-tropics-width", "0.12",
+  "--day-unequal-hour-lines",
+  "--night-unequal-hour-lines",
+  "--day-unequal-hour-labels",
+  "--night-unequal-hour-labels",
+  "--unequal-hour-label-style", "arabic",
+  "--unequal-hour-width", "0.1",
+  "--unequal-hour-label-size", "0.8",
+  "--unequal-hour-label-width", "0.15",
+  "--unequal-hour-label-line-position", "0.5",
+  "--unequal-hour-label-arc-adjust", "0.0",
+  "--solar-motion-direction", "clockwise",
+  "--unequal-hour-label-letter-spacing", "0.6",
   "--azimuth-labels",
   "--azimuth-label-size", "0.8",
   "--azimuth-label-width", "0.15",
@@ -80,9 +101,11 @@ pixi run draw-azimuthal-equidistant -- @(
   "--crosshair",
   "--crosshair-horizontal-width", "0.1",
   "--crosshair-vertical-width", "0.15",
-  "--output", "sample.svg"
+  "--output", "examples/azimuthal_equidistant.svg"
 )
 ```
+
+![Azimuthal equidistant example](examples/azimuthal_equidistant.svg)
 
 ## Notes
 
@@ -104,6 +127,21 @@ pixi run draw-azimuthal-equidistant -- @(
 - `--equator-tropics` draws the celestial equator and the northern/southern tropic lines.
 - `--equator-tropics-width` sets the shared line width for those three lines in millimeters.
 - The tropic declination is fixed at `23.4392911111` degrees.
+- `--day-unequal-hour-lines` draws the 11 daytime unequal-hour lines, dividing sunrise to sunset into 12 equal temporal hours.
+- `--night-unequal-hour-lines` draws the 11 nighttime unequal-hour lines, dividing sunset to sunrise into 12 equal temporal hours.
+- `--unequal-hour-width` sets the shared line width for both daytime and nighttime unequal-hour lines in millimeters.
+- `--day-unequal-hour-labels` labels the daytime unequal-hour lines.
+- `--night-unequal-hour-labels` labels the nighttime unequal-hour lines.
+- Unequal-hour labels are drawn only when their corresponding unequal-hour lines are also enabled.
+- `--unequal-hour-label-style` switches unequal-hour labels between `roman` and `arabic`.
+- `--unequal-hour-label-size` sets the unequal-hour label font size in millimeters.
+- `--unequal-hour-label-width` sets the unequal-hour label stroke width in millimeters.
+- `--unequal-hour-label-line-position` sets where the label sits along each unequal-hour line from the outer visible tropic-side anchor: `0` is closest to that outer anchor, `1` is farther inward, and negative values extend outward along the line trend.
+- `--unequal-hour-label-arc-adjust` shifts the label along its label circle within `[-1, 1]`: positive moves toward larger hour numbers, negative toward smaller ones, scaled by the arc to the adjacent hour-line point on the same circle.
+- `--solar-motion-direction` sets whether solar motion, unequal-hour label numbering, and azimuth label handedness increase `clockwise` or `counterclockwise`.
+- `--unequal-hour-label-letter-spacing` sets the spacing between unequal-hour label glyphs in millimeters.
+- Unequal-hour labels stay upright instead of rotating with the line, and are placed as close as practical to the outer visible tropic side while staying inside the current projection range.
+- Unequal-hour lines are traced across the Sun's declination range between the two tropics, so at latitudes with circumpolar day or night they may appear only over part of that range.
 - `--azimuth-labels` adds `N, NE, E, SE, S, SW, W, NW` between the horizon and the astronomical twilight line.
 - `--azimuth-label-size` sets the label font size in millimeters.
 - `--azimuth-label-width` sets the label stroke width in millimeters.
@@ -123,9 +161,9 @@ Use `draw_stereographic.py` through the `draw-stereographic` task. It accepts th
 
 ```powershell
 pixi run draw-stereographic -- @(
-  "--latitude", "49.86667",
-  "--center", "north",
-  "--range-latitude", "-23.5",
+  "--latitude", "50",
+  "--center", "south",
+  "--range-latitude", "23.5",
   "--diameter", "40",
   "--azimuth-lines", "12",
   "--altitude-lines", "5",
@@ -140,6 +178,18 @@ pixi run draw-stereographic -- @(
   "--twilight-style", "dashed",
   "--equator-tropics",
   "--equator-tropics-width", "0.12",
+  "--day-unequal-hour-lines",
+  "--night-unequal-hour-lines",
+  "--day-unequal-hour-labels",
+  "--night-unequal-hour-labels",
+  "--unequal-hour-label-style", "arabic",
+  "--unequal-hour-width", "0.1",
+  "--unequal-hour-label-size", "0.8",
+  "--unequal-hour-label-width", "0.15",
+  "--unequal-hour-label-line-position", "0.1",
+  "--unequal-hour-label-arc-adjust", "0.2",
+  "--solar-motion-direction", "counterclockwise",
+  "--unequal-hour-label-letter-spacing", "0.6",
   "--azimuth-labels",
   "--azimuth-label-size", "0.8",
   "--azimuth-label-width", "0.15",
@@ -149,9 +199,11 @@ pixi run draw-stereographic -- @(
   "--crosshair",
   "--crosshair-horizontal-width", "0.1",
   "--crosshair-vertical-width", "0.15",
-  "--output", "stereographic.svg"
+  "--output", "examples/stereographic.svg"
 )
 ```
+
+![Stereographic example](examples/stereographic.svg)
 
 - `draw_stereographic.py` keeps the same CLI as `draw_azimuthal_equidistant.py`.
 - In stereographic projection, the antipodal pole diverges to infinity, so `--range-latitude` cannot be the opposite pole itself.
