@@ -73,12 +73,16 @@ pixi run draw-azimuthal-equidistant -- @(
   "--center", "north",
   "--range-latitude", "-55",
   "--diameter", "40",
-  "--azimuth-lines", "12",
-  "--altitude-lines", "5",
+  "--azimuth-lines", "30",
+  "--altitude-lines", "15",
+  "--sub-azimuth-lines", "3",
+  "--sub-altitude-lines", "3",
   "--boundary-width", "0.1",
   "--horizon-width", "0.2",
   "--azimuth-width", "0.1",
   "--altitude-width", "0.1",
+  "--sub-azimuth-width", "0.05",
+  "--sub-altitude-width", "0.05",
   "--civil-twilight",
   "--nautical-twilight",
   "--astronomical-twilight",
@@ -122,8 +126,14 @@ pixi run draw-azimuthal-equidistant -- @(
 - Use `--rotate-180` to rotate the projection 180 degrees and place the sky region below the image.
 - `--boundary-width` sets the outer boundary line width in millimeters.
 - `--horizon-width` sets the horizon line width in millimeters.
+- `--azimuth-lines` draws azimuth lines every N degrees; use `0` to disable them.
+- `--altitude-lines` draws altitude lines every N degrees; use `0` to disable them.
+- `--sub-azimuth-lines` splits each azimuth main interval into `N` cells using sub-lines. `0` or `1` disables them.
+- `--sub-altitude-lines` splits each altitude main interval into `N` cells using sub-lines. `0` or `1` disables them.
 - `--azimuth-width` sets the azimuth line width in millimeters.
 - `--altitude-width` sets the altitude line width in millimeters.
+- `--sub-azimuth-width` sets the sub-azimuth line width in millimeters.
+- `--sub-altitude-width` sets the sub-altitude line width in millimeters.
 - `--civil-twilight` draws the `-6 degree` twilight line.
 - `--nautical-twilight` draws the `-12 degree` twilight line.
 - `--astronomical-twilight` draws the `-18 degree` twilight line.
@@ -171,12 +181,16 @@ pixi run draw-stereographic -- @(
   "--center", "south",
   "--range-latitude", "23.5",
   "--diameter", "40",
-  "--azimuth-lines", "12",
-  "--altitude-lines", "5",
+  "--azimuth-lines", "30",
+  "--altitude-lines", "15",
+  "--sub-azimuth-lines", "3",
+  "--sub-altitude-lines", "3",
   "--boundary-width", "0.1",
   "--horizon-width", "0.2",
   "--azimuth-width", "0.1",
   "--altitude-width", "0.1",
+  "--sub-azimuth-width", "0.05",
+  "--sub-altitude-width", "0.05",
   "--civil-twilight",
   "--nautical-twilight",
   "--astronomical-twilight",

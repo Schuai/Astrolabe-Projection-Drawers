@@ -9,6 +9,7 @@ __pycache__/
 *_test.svg
 *_repro.svg
 *_fix.svg
+*.svg
 stereographic.svg
 azimuthal_equidistant.svg
 azimuthal_equidistant_*.svg

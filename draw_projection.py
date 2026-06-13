@@ -55,15 +55,27 @@ def parse_args(projection: str) -> argparse.Namespace:
     )
     parser.add_argument(
         "--azimuth-lines",
-        type=int,
-        default=12,
-        help="Number of azimuth lines to draw. Use 0 to disable.",
+        type=float,
+        default=30.0,
+        help="Draw azimuth lines every N degrees. Use 0 to disable.",
     )
     parser.add_argument(
         "--altitude-lines",
+        type=float,
+        default=15.0,
+        help="Draw altitude lines every N degrees. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--sub-azimuth-lines",
         type=int,
-        default=6,
-        help="Number of altitude lines to draw. Use 0 to disable.",
+        default=0,
+        help="Split each azimuth main interval into N cells with sub-lines. Use 0 or 1 to disable.",
+    )
+    parser.add_argument(
+        "--sub-altitude-lines",
+        type=int,
+        default=0,
+        help="Split each altitude main interval into N cells with sub-lines. Use 0 or 1 to disable.",
     )
     parser.add_argument(
         "--boundary-width",
@@ -88,6 +100,18 @@ def parse_args(projection: str) -> argparse.Namespace:
         type=float,
         default=0.8,
         help="Stroke width of the altitude lines.",
+    )
+    parser.add_argument(
+        "--sub-azimuth-width",
+        type=float,
+        default=0.4,
+        help="Stroke width of the sub-azimuth lines.",
+    )
+    parser.add_argument(
+        "--sub-altitude-width",
+        type=float,
+        default=0.4,
+        help="Stroke width of the sub-altitude lines.",
     )
     parser.add_argument(
         "--civil-twilight",
@@ -300,6 +324,16 @@ def validate_args(args: argparse.Namespace) -> None:
     ):
         if value < 0:
             raise ValueError(f"{label} cannot be negative.")
+    for label, value in (
+        ("sub-azimuth-lines", args.sub_azimuth_lines),
+        ("sub-altitude-lines", args.sub_altitude_lines),
+    ):
+        if value < 0:
+            raise ValueError(f"{label} cannot be negative.")
+    if args.azimuth_lines >= 360:
+        raise ValueError("azimuth-lines must be less than 360, or 0 to disable.")
+    if args.altitude_lines >= 90:
+        raise ValueError("altitude-lines must be less than 90, or 0 to disable.")
 
     if args.twilight_width is not None and args.twilight_width < 0:
         raise ValueError("twilight-width cannot be negative.")
@@ -309,6 +343,8 @@ def validate_args(args: argparse.Namespace) -> None:
         ("horizon-width", args.horizon_width),
         ("azimuth-width", args.azimuth_width),
         ("altitude-width", args.altitude_width),
+        ("sub-azimuth-width", args.sub_azimuth_width),
+        ("sub-altitude-width", args.sub_altitude_width),
         ("astronomical-twilight-width", args.astronomical_twilight_width),
         ("equator-tropics-width", args.equator_tropics_width),
         ("unequal-hour-width", args.unequal_hour_width),
@@ -1498,11 +1534,30 @@ def add_unequal_hour_labels(
         add_vector_label(parent, label, x, y, 0.0, font_size, stroke_width, letter_spacing)
 
 
-def evenly_spaced_values(count: int, start: float, stop: float) -> Iterable[float]:
-    if count <= 0:
+def values_at_interval(step: float, start: float, stop: float) -> Iterable[float]:
+    if step <= 0:
         return []
-    step = (stop - start) / count
-    return [start + step * index for index in range(count)]
+    values: list[float] = []
+    value = start
+    while value < stop:
+        values.append(value)
+        value += step
+    return values
+
+
+def subdivided_interval_values(interval: float, subdivisions: int, stop: float) -> Iterable[float]:
+    if interval <= 0 or subdivisions <= 1:
+        return []
+    sub_step = interval / subdivisions
+    values: list[float] = []
+    value = sub_step
+    tolerance = 1e-9
+    while value < stop - tolerance:
+        nearest_main_multiple = round(value / interval)
+        if abs(value - nearest_main_multiple * interval) > tolerance:
+            values.append(value)
+        value += sub_step
+    return values
 
 
 def crosshair_widths(args: argparse.Namespace) -> tuple[float, float]:
@@ -1532,6 +1587,8 @@ def build_svg(args: argparse.Namespace) -> ElementTree:
         args.horizon_width,
         args.azimuth_width,
         args.altitude_width,
+        args.sub_azimuth_width,
+        args.sub_altitude_width,
         shared_twilight_width,
         args.equator_tropics_width,
         args.unequal_hour_width,
@@ -1595,16 +1652,33 @@ def build_svg(args: argparse.Namespace) -> ElementTree:
             clip_id,
         )
 
+    if args.altitude_lines > 0 and args.sub_altitude_lines > 1:
+        sub_altitudes = subdivided_interval_values(args.altitude_lines, args.sub_altitude_lines, 90.0)
+        for altitude in sub_altitudes:
+            points = sample_altitude_line(
+                args.latitude, altitude, args.center, args.projection, radius_scale, center
+            )
+            add_path(grid, points, args.sub_altitude_width, clip_id, closed=True)
+
     if args.altitude_lines > 0:
-        altitudes = evenly_spaced_values(args.altitude_lines, 90.0 / (args.altitude_lines + 1), 90.0)
+        altitudes = values_at_interval(args.altitude_lines, args.altitude_lines, 90.0)
         for altitude in altitudes:
             points = sample_altitude_line(
                 args.latitude, altitude, args.center, args.projection, radius_scale, center
             )
             add_path(grid, points, args.altitude_width, clip_id, closed=True)
 
+    if args.azimuth_lines > 0 and args.sub_azimuth_lines > 1:
+        sub_azimuths = subdivided_interval_values(args.azimuth_lines, args.sub_azimuth_lines, 360.0)
+        for azimuth in sub_azimuths:
+            points = sample_azimuth_line(
+                args.latitude, azimuth, args.center, args.projection, radius_scale, center
+            )
+            for segment in split_by_projection_circle(points, center, canvas_radius):
+                add_path(grid, segment, args.sub_azimuth_width, clip_id)
+
     if args.azimuth_lines > 0:
-        azimuths = evenly_spaced_values(args.azimuth_lines, 0.0, 360.0)
+        azimuths = values_at_interval(args.azimuth_lines, 0.0, 360.0)
         for azimuth in azimuths:
             points = sample_azimuth_line(
                 args.latitude, azimuth, args.center, args.projection, radius_scale, center
