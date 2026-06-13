@@ -52,6 +52,12 @@ This project uses `pixi` to manage Python and the project environment. The `pixi
    pixi shell
    ```
 
+6. Run the interactive image rectifier.
+
+   ```powershell
+   pixi run perspective-correct -- --input-path "E:\path\to\input.png" --save-path "E:\path\to\output.png"
+   ```
+
 Official pixi docs:
 
 - Installation: https://pixi.prefix.dev/latest/installation/
@@ -207,3 +213,41 @@ pixi run draw-stereographic -- @(
 
 - `draw_stereographic.py` keeps the same CLI as `draw_azimuthal_equidistant.py`.
 - In stereographic projection, the antipodal pole diverges to infinity, so `--range-latitude` cannot be the opposite pole itself.
+
+## Image Rectifier
+
+Use `perspective_corrector.py` through the `perspective-correct` task:
+
+```powershell
+pixi run perspective-correct -- --input-path "E:\path\to\input.png" --save-path "E:\path\to\output.png"
+```
+
+The script opens an interactive OpenCV window for manual rectification.
+
+### Mode Selection
+
+- Press `b` to use quadrilateral mode.
+- Press `c` to select circle mode.
+
+### Quadrilateral Mode
+
+- Press `a` to arm the next point.
+- Left click once to place that point.
+- Press `d` to delete the most recently added point.
+- Add 4 points in order around the target region.
+- Starting from the second point, each new point is connected to the previous point.
+- After the fourth point, the preview closes the shape back to the first point.
+- Press `Enter` to rectify the selected quadrilateral into a square.
+
+### Result Preview
+
+- Press `s` to save the corrected image to `--save-path` and exit.
+- Press `q` to exit without saving.
+- Press `r` to discard the current result and restart from the original image.
+- Press `a` to start a new selection on top of the corrected image.
+
+### Circle Mode Status
+
+- `c` mode is currently not implemented.
+- Three points on a circle are not enough to recover a reliable perspective rectification uniquely.
+- If circle-based rectification is needed later, the workflow should use more points and ellipse fitting or additional geometric constraints.
