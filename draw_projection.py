@@ -14,7 +14,7 @@ LABEL_GLYPH_WIDTH = 0.7
 LABEL_GLYPH_SPACING = 0.18
 TROPIC_DECLINATION = 23.4392911111
 ROMAN_NUMERALS = ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI")
-ARABIC_NUMERALS = tuple(str(number) for number in range(1, 12))
+ARABIC_NUMERALS = tuple(str(number) for number in range(1, 13))
 AZIMUTHAL_EQUIDISTANT = "azimuthal-equidistant"
 STEREOGRAPHIC = "stereographic"
 CLOCKWISE = "clockwise"
@@ -211,14 +211,14 @@ def parse_args(projection: str) -> argparse.Namespace:
     parser.add_argument(
         "--date-ring-width",
         type=float,
-        default=2.0,
-        help="Band width in millimeters between the ecliptic counter and the outer date ring boundary.",
-    )
-    parser.add_argument(
-        "--date-ring-width-stroke",
-        type=float,
         default=None,
         help="Stroke width of the date ring inner and outer boundary curves. Defaults to ecliptic-width.",
+    )
+    parser.add_argument(
+        "--date-ring-band-width",
+        type=float,
+        default=2.0,
+        help="Band width in millimeters between the projection counter and the outer date ring boundary.",
     )
     parser.add_argument(
         "--date-ring-month-width",
@@ -237,6 +237,63 @@ def parse_args(projection: str) -> argparse.Namespace:
         type=int,
         default=0,
         help="Day interval between sub date ring ticks. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--date-ring-sub-sub-width",
+        type=float,
+        default=0.25,
+        help="Stroke width of the second-level sub day date ring ticks.",
+    )
+    parser.add_argument(
+        "--date-ring-sub-sub-interval",
+        type=int,
+        default=0,
+        help="Day interval between second-level sub date ring ticks. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--date-ring-month-labels",
+        action="store_true",
+        help="Label the date ring month-end ticks with upright Arabic month numbers.",
+    )
+    parser.add_argument(
+        "--date-ring-month-label-size",
+        type=float,
+        default=4.0,
+        help="Font size in millimeters for date ring month labels.",
+    )
+    parser.add_argument(
+        "--date-ring-month-label-width",
+        type=float,
+        default=0.2,
+        help="Stroke width in millimeters for date ring month labels.",
+    )
+    parser.add_argument(
+        "--date-ring-month-label-line-position",
+        type=float,
+        default=0.5,
+        help="Label position from the outer date-ring boundary (0) toward the counter-side inner boundary (1). Negative values extend outward along the radial direction.",
+    )
+    parser.add_argument(
+        "--date-ring-month-label-arc-adjust",
+        type=float,
+        default=0.0,
+        help="Angular adjustment in degrees for date ring month labels along the date ring. Positive moves toward later dates in the month, negative toward earlier dates.",
+    )
+    parser.add_argument(
+        "--date-ring-month-label-letter-spacing",
+        type=float,
+        default=LABEL_GLYPH_SPACING,
+        help="Additional spacing between date ring month label glyphs in millimeters.",
+    )
+    parser.add_argument(
+        "--reverse-date-ring-month-label-orientation",
+        action="store_true",
+        help="Reverse the radial orientation of date ring month labels so their bottoms point toward the center instead of their tops.",
+    )
+    parser.add_argument(
+        "--rotate-date-ring-180",
+        action="store_true",
+        help="Rotate the entire date ring by 180 degrees. Disabled by default.",
     )
     parser.add_argument(
         "--date-ring-year",
@@ -405,6 +462,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("azimuth-label-position must be within [0, 1].")
     if args.unequal_hour_label_line_position > 1.0:
         raise ValueError("unequal-hour-label-line-position cannot be greater than 1.")
+    if args.date_ring_month_label_line_position > 1.0:
+        raise ValueError("date-ring-month-label-line-position cannot be greater than 1.")
     if not -1.0 <= args.unequal_hour_label_arc_adjust <= 1.0:
         raise ValueError("unequal-hour-label-arc-adjust must be within [-1, 1].")
 
@@ -415,7 +474,7 @@ def validate_args(args: argparse.Namespace) -> None:
         ("azimuth-lines", args.azimuth_lines),
         ("altitude-lines", args.altitude_lines),
         ("ecliptic-angle-lines", args.ecliptic_angle_lines),
-        ("date-ring-width", args.date_ring_width),
+        ("date-ring-band-width", args.date_ring_band_width),
     ):
         if value < 0:
             raise ValueError(f"{label} cannot be negative.")
@@ -424,6 +483,7 @@ def validate_args(args: argparse.Namespace) -> None:
         ("sub-altitude-lines", args.sub_altitude_lines),
         ("sub-ecliptic-angle-lines", args.sub_ecliptic_angle_lines),
         ("date-ring-sub-interval", args.date_ring_sub_interval),
+        ("date-ring-sub-sub-interval", args.date_ring_sub_sub_interval),
     ):
         if value < 0:
             raise ValueError(f"{label} cannot be negative.")
@@ -451,11 +511,14 @@ def validate_args(args: argparse.Namespace) -> None:
         ("sub-ecliptic-angle-width", args.sub_ecliptic_angle_width),
         ("date-ring-month-width", args.date_ring_month_width),
         ("date-ring-sub-width", args.date_ring_sub_width),
+        ("date-ring-sub-sub-width", args.date_ring_sub_sub_width),
         ("unequal-hour-width", args.unequal_hour_width),
         ("unequal-hour-label-size", args.unequal_hour_label_size),
         ("unequal-hour-label-width", args.unequal_hour_label_width),
         ("azimuth-label-size", args.azimuth_label_size),
         ("azimuth-label-width", args.azimuth_label_width),
+        ("date-ring-month-label-size", args.date_ring_month_label_size),
+        ("date-ring-month-label-width", args.date_ring_month_label_width),
         ("crosshair-width", args.crosshair_width),
     ):
         if value < 0:
@@ -465,7 +528,7 @@ def validate_args(args: argparse.Namespace) -> None:
         ("crosshair-horizontal-width", args.crosshair_horizontal_width),
         ("crosshair-vertical-width", args.crosshair_vertical_width),
         ("ecliptic-band-width", args.ecliptic_band_width),
-        ("date-ring-width-stroke", args.date_ring_width_stroke),
+        ("date-ring-width", args.date_ring_width),
     ):
         if value is not None and value < 0:
             raise ValueError(f"{label} cannot be negative.")
@@ -482,6 +545,10 @@ def validate_args(args: argparse.Namespace) -> None:
     if args.unequal_hour_label_letter_spacing <= -LABEL_GLYPH_WIDTH:
         raise ValueError(
             "unequal-hour-label-letter-spacing must be greater than the glyph width negation."
+        )
+    if args.date_ring_month_label_letter_spacing <= -LABEL_GLYPH_WIDTH:
+        raise ValueError(
+            "date-ring-month-label-letter-spacing must be greater than the glyph width negation."
         )
 
     pole_sign = 1.0 if args.center == "north" else -1.0
@@ -951,10 +1018,13 @@ def date_ring_angle_for_day_index(
     vernal_angle: float,
     rotation_direction: str,
     phase_offset_degrees: float,
+    ring_rotation_degrees: float = 0.0,
 ) -> float:
     direction_multiplier = 1.0 if rotation_direction == CLOCKWISE else -1.0
     return normalize_degrees(
-        vernal_angle + direction_multiplier * (day_index * 360.0 / 365.0 + phase_offset_degrees)
+        vernal_angle
+        + direction_multiplier * (day_index * 360.0 / 365.0 + phase_offset_degrees)
+        + ring_rotation_degrees
     )
 
 
@@ -963,9 +1033,14 @@ def date_ring_angle_for_date(
     vernal_angle: float,
     rotation_direction: str,
     phase_offset_degrees: float,
+    ring_rotation_degrees: float = 0.0,
 ) -> float:
     return date_ring_angle_for_day_index(
-        fixed_365_day_index(current_date), vernal_angle, rotation_direction, phase_offset_degrees
+        fixed_365_day_index(current_date),
+        vernal_angle,
+        rotation_direction,
+        phase_offset_degrees,
+        ring_rotation_degrees,
     )
 
 
@@ -974,6 +1049,10 @@ def month_end_dates(year: int) -> list[dt.date]:
         dt.date(year, month_index + 1, month_length)
         for month_index, month_length in enumerate(COMMON_MONTH_LENGTHS)
     ]
+
+
+def month_start_dates(year: int) -> list[dt.date]:
+    return [dt.date(year, month_index + 1, 1) for month_index in range(len(COMMON_MONTH_LENGTHS))]
 
 
 def date_ring_sub_tick_dates(year: int, interval: int) -> list[dt.date]:
@@ -996,6 +1075,10 @@ def date_ring_sub_tick_dates(year: int, interval: int) -> list[dt.date]:
     return sub_tick_dates
 
 
+def date_ring_month_label_text(month_index: int) -> str:
+    return ARABIC_NUMERALS[month_index - 1]
+
+
 def date_ring_tick_for_longitude(
     angle: float,
     circle_center: tuple[float, float],
@@ -1012,6 +1095,70 @@ def date_ring_tick_for_longitude(
         circle_center[1] + date_ring_outer_radius * math.sin(radians),
     )
     return [inner_point, outer_point]
+
+
+def date_ring_month_label_anchor(
+    month_index: int,
+    month_angles: Sequence[float],
+    circle_center: tuple[float, float],
+    date_ring_inner_radius: float,
+    date_ring_outer_radius: float,
+    line_position: float,
+    arc_adjust: float,
+    rotation_direction: str,
+    reverse_orientation: bool,
+) -> tuple[float, float, float]:
+    band_width = date_ring_outer_radius - date_ring_inner_radius
+    if line_position >= 0.0:
+        radius = date_ring_outer_radius - band_width * line_position
+    else:
+        radius = date_ring_outer_radius + band_width * abs(line_position)
+
+    angle = month_angles[month_index - 1]
+    if arc_adjust != 0.0:
+        direction_multiplier = 1.0 if rotation_direction == CLOCKWISE else -1.0
+        angle += direction_multiplier * arc_adjust
+
+    radians = math.radians(angle)
+    x = circle_center[0] + radius * math.cos(radians)
+    y = circle_center[1] + radius * math.sin(radians)
+    to_center_angle = math.degrees(math.atan2(circle_center[1] - y, circle_center[0] - x))
+    label_angle = to_center_angle - 90.0 if reverse_orientation else to_center_angle + 90.0
+    return (
+        x,
+        y,
+        label_angle,
+    )
+
+
+def add_date_ring_month_labels(
+    parent: Element,
+    month_angles: Sequence[float],
+    circle_center: tuple[float, float],
+    date_ring_inner_radius: float,
+    date_ring_outer_radius: float,
+    font_size: float,
+    stroke_width: float,
+    line_position: float,
+    arc_adjust: float,
+    letter_spacing: float,
+    rotation_direction: str,
+    reverse_orientation: bool,
+) -> None:
+    for month_index in range(1, 13):
+        label = date_ring_month_label_text(month_index)
+        x, y, angle = date_ring_month_label_anchor(
+            month_index,
+            month_angles,
+            circle_center,
+            date_ring_inner_radius,
+            date_ring_outer_radius,
+            line_position,
+            arc_adjust,
+            rotation_direction,
+            reverse_orientation,
+        )
+        add_vector_label(parent, label, x, y, angle, font_size, stroke_width, letter_spacing)
 
 
 def format_date_ring_error_summary(
@@ -1086,6 +1233,7 @@ def date_ring_error_summary(
     circle_center: tuple[float, float],
     counter_radius: float,
     rotation_direction: str,
+    ring_rotation_degrees: float,
 ) -> str:
     vernal_point = sample_ecliptic_point(0.0, center, projection, radius_scale, canvas_radius)
     vernal_angle = clockwise_angle(vernal_point, circle_center)
@@ -1103,7 +1251,11 @@ def date_ring_error_summary(
 
     while current_date <= end_date:
         modeled_angle = date_ring_angle_for_date(
-            current_date, vernal_angle, rotation_direction, phase_offset_degrees
+            current_date,
+            vernal_angle,
+            rotation_direction,
+            phase_offset_degrees,
+            ring_rotation_degrees,
         )
         true_longitude = true_solar_ecliptic_longitude(current_date)
         displayed_longitude = displayed_ecliptic_longitude(
@@ -2229,7 +2381,7 @@ def radius_scale_for_projection(canvas_radius: float, outer_angle: float, projec
 def projection_geometry(args: argparse.Namespace) -> tuple[float, float, float, float]:
     crosshair_horizontal_width, crosshair_vertical_width = crosshair_widths(args)
     shared_twilight_width = twilight_width(args)
-    date_ring_width_stroke = (args.date_ring_width_stroke or args.ecliptic_width) if args.date_ring else 0.0
+    date_ring_boundary_width = (args.date_ring_width or args.ecliptic_width) if args.date_ring else 0.0
     margin = max(
         DEFAULT_CANVAS_MARGIN_MM,
         args.boundary_width,
@@ -2243,15 +2395,17 @@ def projection_geometry(args: argparse.Namespace) -> tuple[float, float, float, 
         args.ecliptic_width,
         args.ecliptic_angle_width,
         args.sub_ecliptic_angle_width,
-        date_ring_width_stroke,
+        date_ring_boundary_width,
         args.date_ring_month_width if args.date_ring else 0.0,
         args.date_ring_sub_width if args.date_ring else 0.0,
-        args.date_ring_width if args.date_ring else 0.0,
+        args.date_ring_sub_sub_width if args.date_ring else 0.0,
+        args.date_ring_band_width if args.date_ring else 0.0,
         args.unequal_hour_width,
         crosshair_horizontal_width,
         crosshair_vertical_width,
         args.azimuth_label_size,
         args.unequal_hour_label_size,
+        args.date_ring_month_label_size if args.date_ring and args.date_ring_month_labels else 0.0,
     )
     total_size = args.diameter + margin * 2.0
     canvas_radius = args.diameter / 2.0
@@ -2530,7 +2684,7 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
     rotation_direction = resolved_ecliptic_rotation_direction(args)
     tick_source = ecliptic_tick_source(args.center, args.projection, radius_scale, center)
     outer_radius = default_ecliptic_band_width(ecliptic, circle_center)
-    date_ring_boundary_width = args.date_ring_width_stroke or args.ecliptic_width
+    date_ring_boundary_width = args.date_ring_width or args.ecliptic_width
     band_width = (
         args.ecliptic_band_width
         if args.ecliptic_band_width is not None
@@ -2578,7 +2732,8 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
     add_path(grid, inner_ecliptic, args.ecliptic_width, clip_id, closed=True)
     if args.date_ring:
         date_ring_inner_radius = canvas_radius
-        date_ring_outer_radius = canvas_radius + args.date_ring_width
+        date_ring_outer_radius = canvas_radius + args.date_ring_band_width
+        ring_rotation_degrees = 180.0 if args.rotate_date_ring_180 else 0.0
         vernal_point = sample_ecliptic_point(0.0, args.center, args.projection, radius_scale, center)
         vernal_angle = clockwise_angle(vernal_point, counter_center)
         phase_offset_degrees = optimal_date_ring_phase_offset(
@@ -2615,13 +2770,18 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
             },
         )
 
-        for month_end in month_end_dates(args.date_ring_year):
-            month_angle = date_ring_angle_for_date(
+        month_angles = [
+            date_ring_angle_for_date(
                 month_end,
                 vernal_angle,
                 rotation_direction,
                 phase_offset_degrees,
+                ring_rotation_degrees,
             )
+            for month_end in month_end_dates(args.date_ring_year)
+        ]
+
+        for month_angle in month_angles:
             tick = date_ring_tick_for_longitude(
                 month_angle,
                 counter_center,
@@ -2629,6 +2789,32 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
                 date_ring_outer_radius,
             )
             add_path(grid, tick, args.date_ring_month_width, None)
+
+        if args.date_ring_month_labels:
+            month_label_angles = [
+                date_ring_angle_for_date(
+                    month_start,
+                    vernal_angle,
+                    rotation_direction,
+                    phase_offset_degrees,
+                    ring_rotation_degrees,
+                )
+                for month_start in month_start_dates(args.date_ring_year)
+            ]
+            add_date_ring_month_labels(
+                grid,
+                month_label_angles,
+                counter_center,
+                date_ring_inner_radius,
+                date_ring_outer_radius,
+                args.date_ring_month_label_size,
+                args.date_ring_month_label_width,
+                args.date_ring_month_label_line_position,
+                args.date_ring_month_label_arc_adjust,
+                args.date_ring_month_label_letter_spacing,
+                rotation_direction,
+                args.reverse_date_ring_month_label_orientation,
+            )
 
         if args.date_ring_sub_interval > 0:
             for sub_tick_date in date_ring_sub_tick_dates(
@@ -2639,6 +2825,7 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
                     vernal_angle,
                     rotation_direction,
                     phase_offset_degrees,
+                    ring_rotation_degrees,
                 )
                 tick = date_ring_tick_for_longitude(
                     sub_angle,
@@ -2647,6 +2834,24 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
                     date_ring_outer_radius,
                 )
                 add_path(grid, tick, args.date_ring_sub_width, None)
+        if args.date_ring_sub_sub_interval > 0:
+            for sub_sub_tick_date in date_ring_sub_tick_dates(
+                args.date_ring_year, args.date_ring_sub_sub_interval
+            ):
+                sub_sub_angle = date_ring_angle_for_date(
+                    sub_sub_tick_date,
+                    vernal_angle,
+                    rotation_direction,
+                    phase_offset_degrees,
+                    ring_rotation_degrees,
+                )
+                tick = date_ring_tick_for_longitude(
+                    sub_sub_angle,
+                    counter_center,
+                    date_ring_inner_radius,
+                    date_ring_outer_radius,
+                )
+                add_path(grid, tick, args.date_ring_sub_sub_width, None)
     if args.boundary_width > 0:
         SubElement(
             root,
@@ -2692,5 +2897,6 @@ def main(projection: str) -> None:
                     counter_center,
                     counter_radius,
                     resolved_ecliptic_rotation_direction(args),
+                    180.0 if args.rotate_date_ring_180 else 0.0,
                 )
             )

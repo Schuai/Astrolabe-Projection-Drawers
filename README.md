@@ -243,11 +243,21 @@ Use `--ecliptic` to write the ecliptic as a separate companion SVG for the same 
 - `--date-ring` draws a date ring outside the projection counter in the companion ecliptic SVG.
 - The date ring is concentric with the projection counter center, not with the ecliptic circle center.
 - The projection counter itself is the date ring inner boundary.
-- `--date-ring-width` sets the radial width in millimeters between the counter and the date ring outer boundary, independent of the ecliptic geometry.
-- `--date-ring-width-stroke` sets the stroke width of the date ring inner and outer boundaries. If omitted, it follows `--ecliptic-width`.
+- `--date-ring-width` sets the stroke width of the date ring inner and outer boundaries. If omitted, it follows `--ecliptic-width`.
+- `--date-ring-band-width` sets the radial width in millimeters between the counter and the date ring outer boundary, independent of the ecliptic geometry.
+- `--rotate-date-ring-180` rotates the entire date ring by `180` degrees. It is off by default.
 - `--date-ring-month-width` sets the stroke width of month-end date ring ticks.
 - `--date-ring-sub-width` sets the stroke width of sub day date ring ticks.
 - `--date-ring-sub-interval` sets the day spacing of sub ticks. `1` means daily ticks. `0` disables them.
+- `--date-ring-sub-sub-width` sets the stroke width of second-level sub day date ring ticks.
+- `--date-ring-sub-sub-interval` sets the day spacing of second-level sub ticks. `1` means daily ticks. `0` disables them.
+- `--date-ring-month-labels` labels the starts of months on the date ring with upright Arabic month numbers, aligned to the corresponding previous month-end boundary.
+- `--date-ring-month-label-size` sets the month label font size in millimeters.
+- `--date-ring-month-label-width` sets the month label stroke width in millimeters.
+- `--date-ring-month-label-line-position` sets where the month label sits across the date-ring band from the outer boundary: `0` is outermost, `1` is closest to the counter, and negative values extend outward.
+- `--date-ring-month-label-arc-adjust` shifts the month label along the date ring by a fixed angle in degrees: positive moves toward later dates in the month, negative toward earlier dates.
+- `--date-ring-month-label-letter-spacing` sets the spacing between month label glyphs in millimeters.
+- Date ring month labels are radially oriented by default with their tops pointing toward the center. `--reverse-date-ring-month-label-orientation` flips them so their bottoms point toward the center instead.
 - `--date-ring-year` chooses which calendar year's solar-longitude progression is used to optimize the date-ring phase. The default is `2026`.
 - The date ring always uses `365` equal day divisions. Leap years do not add a February 29 slot; the ring stays idealized and the selected year only changes the optimized phase and the reported error summary.
 - Instead of forcing any specific calendar day to the vernal point, the program chooses the single phase offset that minimizes the maximum angular date-ring error across the selected year.
@@ -272,8 +282,19 @@ pixi run draw-stereographic -- @(
   "--sub-ecliptic-angle-width", "0.05",
   "--ecliptic-rotation-direction", "counterclockwise",
   "--date-ring",
-  "--date-ring-width", "2.0",
+  "--date-ring-width", "0.17",
+  "--date-ring-band-width", "2.0",
+  "--date-ring-month-width", "0.11",
+  "--date-ring-sub-width", "0.05",
+  "--date-ring-sub-sub-width", "0.03",
   "--date-ring-sub-interval", "1",
+  "--date-ring-sub-sub-interval", "5",
+  "--date-ring-month-labels",
+  "--date-ring-month-label-size", "0.8",
+  "--date-ring-month-label-width", "0.15",
+  "--date-ring-month-label-line-position", "0.5",
+  "--date-ring-month-label-arc-adjust", "0.0",
+  "--date-ring-month-label-letter-spacing", "0.6",
   "--date-ring-year", "2026",
   "--output", "examples/stereographic.svg"
 )
