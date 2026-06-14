@@ -228,6 +228,64 @@ pixi run draw-stereographic -- @(
 - `draw_stereographic.py` keeps the same CLI as `draw_azimuthal_equidistant.py`.
 - In stereographic projection, the antipodal pole diverges to infinity, so `--range-latitude` cannot be the opposite pole itself.
 
+## Ecliptic
+
+Use `--ecliptic` to write the ecliptic as a separate companion SVG for the same projection, and `--ecliptic-width` to control its line width in millimeters.
+
+- `--ecliptic-band-width` sets the band width in millimeters between the ecliptic and its inner concentric curve. If omitted, it defaults to the ecliptic circle radius.
+- `--ecliptic-angle-lines` draws main inward ecliptic angle tick marks every `N` degrees along the ecliptic.
+- `--sub-ecliptic-angle-lines` splits each main ecliptic angle interval into `N` cells using sub tick marks. `0` or `1` disables them.
+- `--ecliptic-angle-width` sets the main ecliptic angle tick mark width in millimeters.
+- `--sub-ecliptic-angle-width` sets the sub ecliptic angle tick mark width in millimeters.
+- `--ecliptic-rotation-direction` sets whether ecliptic longitudes and date-ring dates increase `clockwise` or `counterclockwise` in the companion ecliptic SVG. If omitted, it follows `--solar-motion-direction`.
+- Main tick marks and sub tick marks both span the full ecliptic band width.
+- The companion ecliptic SVG draws both the outer ecliptic and its inner concentric curve, keeps the projection boundary circle for alignment, and emits ecliptic ticks from the traditional stereographic source point where the equinox and solstice chords intersect.
+- `--date-ring` draws a date ring outside the projection counter in the companion ecliptic SVG.
+- The date ring is concentric with the projection counter center, not with the ecliptic circle center.
+- The projection counter itself is the date ring inner boundary.
+- `--date-ring-width` sets the radial width in millimeters between the counter and the date ring outer boundary, independent of the ecliptic geometry.
+- `--date-ring-width-stroke` sets the stroke width of the date ring inner and outer boundaries. If omitted, it follows `--ecliptic-width`.
+- `--date-ring-month-width` sets the stroke width of month-end date ring ticks.
+- `--date-ring-sub-width` sets the stroke width of sub day date ring ticks.
+- `--date-ring-sub-interval` sets the day spacing of sub ticks. `1` means daily ticks. `0` disables them.
+- `--date-ring-year` chooses which calendar year's solar-longitude progression is used to optimize the date-ring phase. The default is `2026`.
+- The date ring always uses `365` equal day divisions. Leap years do not add a February 29 slot; the ring stays idealized and the selected year only changes the optimized phase and the reported error summary.
+- Instead of forcing any specific calendar day to the vernal point, the program chooses the single phase offset that minimizes the maximum angular date-ring error across the selected year.
+- That longitude approximation is a standard Julian-day solar-position formula of the Meeus/NOAA style: it computes Julian centuries from J2000, then solar mean longitude, mean anomaly, equation of center, true longitude, and a small apparent-longitude correction.
+- This is intended for date-ring alignment and error estimation, not for high-precision ephemeris work.
+- When `--date-ring` is enabled, the program prints a stdout summary of the equal-day ring error relative to approximate true solar ecliptic longitude progression for the selected year.
+
+```powershell
+pixi run draw-stereographic -- @(
+  "--latitude", "49.86667",
+  "--center", "south",
+  "--range-latitude", "23.5",
+  "--diameter", "40",
+  "--azimuth-lines", "0",
+  "--altitude-lines", "0",
+  "--ecliptic",
+  "--ecliptic-width", "0.17",
+  "--ecliptic-band-width", "2.0",
+  "--ecliptic-angle-lines", "30",
+  "--sub-ecliptic-angle-lines", "3",
+  "--ecliptic-angle-width", "0.11",
+  "--sub-ecliptic-angle-width", "0.05",
+  "--ecliptic-rotation-direction", "counterclockwise",
+  "--date-ring",
+  "--date-ring-width", "2.0",
+  "--date-ring-sub-interval", "1",
+  "--date-ring-year", "2026",
+  "--output", "examples/stereographic.svg"
+)
+```
+
+This produces:
+
+- `examples/stereographic.svg`
+- `examples/stereographic_ecliptic.svg`
+
+The companion ecliptic file uses the main `--output` filename with an added `_ecliptic` suffix before `.svg`.
+
 ## Image Rectifier
 
 Use `perspective_corrector.py` through the `perspective-correct` task:

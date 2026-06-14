@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import math
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -18,6 +19,10 @@ AZIMUTHAL_EQUIDISTANT = "azimuthal-equidistant"
 STEREOGRAPHIC = "stereographic"
 CLOCKWISE = "clockwise"
 COUNTERCLOCKWISE = "counterclockwise"
+COMMON_MONTH_LENGTHS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+COMMON_MONTH_END_DAY_INDICES = tuple(
+    sum(COMMON_MONTH_LENGTHS[: month + 1]) - 1 for month in range(len(COMMON_MONTH_LENGTHS))
+)
 PROJECTION_DESCRIPTIONS = {
     AZIMUTHAL_EQUIDISTANT: "Draw a horizon azimuthal-equidistant SVG for a given observer latitude.",
     STEREOGRAPHIC: "Draw a horizon stereographic SVG for a given observer latitude.",
@@ -156,6 +161,94 @@ def parse_args(projection: str) -> argparse.Namespace:
         type=float,
         default=0.8,
         help="Shared stroke width of the celestial equator and tropic lines.",
+    )
+    parser.add_argument(
+        "--ecliptic",
+        action="store_true",
+        help="Draw the ecliptic into a separate companion SVG.",
+    )
+    parser.add_argument(
+        "--ecliptic-width",
+        type=float,
+        default=0.8,
+        help="Stroke width of the ecliptic in millimeters.",
+    )
+    parser.add_argument(
+        "--ecliptic-band-width",
+        type=float,
+        default=None,
+        help="Band width in millimeters between the ecliptic and its inner concentric curve in the companion ecliptic SVG.",
+    )
+    parser.add_argument(
+        "--ecliptic-angle-lines",
+        type=float,
+        default=0.0,
+        help="Draw main inward ecliptic angle tick marks every N degrees in the companion ecliptic SVG. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--sub-ecliptic-angle-lines",
+        type=int,
+        default=0,
+        help="Split each main ecliptic angle interval into N cells with sub tick marks. Use 0 or 1 to disable.",
+    )
+    parser.add_argument(
+        "--ecliptic-angle-width",
+        type=float,
+        default=0.8,
+        help="Stroke width of the main ecliptic angle tick marks.",
+    )
+    parser.add_argument(
+        "--sub-ecliptic-angle-width",
+        type=float,
+        default=0.4,
+        help="Stroke width of the sub ecliptic angle tick marks.",
+    )
+    parser.add_argument(
+        "--date-ring",
+        action="store_true",
+        help="Draw a date ring outside the ecliptic counter in the companion ecliptic SVG.",
+    )
+    parser.add_argument(
+        "--date-ring-width",
+        type=float,
+        default=2.0,
+        help="Band width in millimeters between the ecliptic counter and the outer date ring boundary.",
+    )
+    parser.add_argument(
+        "--date-ring-width-stroke",
+        type=float,
+        default=None,
+        help="Stroke width of the date ring inner and outer boundary curves. Defaults to ecliptic-width.",
+    )
+    parser.add_argument(
+        "--date-ring-month-width",
+        type=float,
+        default=0.8,
+        help="Stroke width of the month-end date ring ticks.",
+    )
+    parser.add_argument(
+        "--date-ring-sub-width",
+        type=float,
+        default=0.4,
+        help="Stroke width of the sub day date ring ticks.",
+    )
+    parser.add_argument(
+        "--date-ring-sub-interval",
+        type=int,
+        default=0,
+        help="Day interval between sub date ring ticks. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--date-ring-year",
+        type=int,
+        default=2026,
+        help="Calendar year whose solar longitude progression is used to optimize the date-ring phase.",
+    )
+    parser.add_argument(
+        "--ecliptic-rotation-direction",
+        choices=(CLOCKWISE, COUNTERCLOCKWISE),
+        default=None,
+        help="Whether ecliptic longitudes and date-ring dates increase clockwise or counterclockwise in the companion ecliptic SVG. Defaults to solar-motion-direction.",
     )
     parser.add_argument(
         "--day-unequal-hour-lines",
@@ -321,12 +414,16 @@ def validate_args(args: argparse.Namespace) -> None:
     for label, value in (
         ("azimuth-lines", args.azimuth_lines),
         ("altitude-lines", args.altitude_lines),
+        ("ecliptic-angle-lines", args.ecliptic_angle_lines),
+        ("date-ring-width", args.date_ring_width),
     ):
         if value < 0:
             raise ValueError(f"{label} cannot be negative.")
     for label, value in (
         ("sub-azimuth-lines", args.sub_azimuth_lines),
         ("sub-altitude-lines", args.sub_altitude_lines),
+        ("sub-ecliptic-angle-lines", args.sub_ecliptic_angle_lines),
+        ("date-ring-sub-interval", args.date_ring_sub_interval),
     ):
         if value < 0:
             raise ValueError(f"{label} cannot be negative.")
@@ -334,6 +431,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("azimuth-lines must be less than 360, or 0 to disable.")
     if args.altitude_lines >= 90:
         raise ValueError("altitude-lines must be less than 90, or 0 to disable.")
+    if args.ecliptic_angle_lines >= 360:
+        raise ValueError("ecliptic-angle-lines must be less than 360, or 0 to disable.")
 
     if args.twilight_width is not None and args.twilight_width < 0:
         raise ValueError("twilight-width cannot be negative.")
@@ -347,6 +446,11 @@ def validate_args(args: argparse.Namespace) -> None:
         ("sub-altitude-width", args.sub_altitude_width),
         ("astronomical-twilight-width", args.astronomical_twilight_width),
         ("equator-tropics-width", args.equator_tropics_width),
+        ("ecliptic-width", args.ecliptic_width),
+        ("ecliptic-angle-width", args.ecliptic_angle_width),
+        ("sub-ecliptic-angle-width", args.sub_ecliptic_angle_width),
+        ("date-ring-month-width", args.date_ring_month_width),
+        ("date-ring-sub-width", args.date_ring_sub_width),
         ("unequal-hour-width", args.unequal_hour_width),
         ("unequal-hour-label-size", args.unequal_hour_label_size),
         ("unequal-hour-label-width", args.unequal_hour_label_width),
@@ -360,9 +464,16 @@ def validate_args(args: argparse.Namespace) -> None:
     for label, value in (
         ("crosshair-horizontal-width", args.crosshair_horizontal_width),
         ("crosshair-vertical-width", args.crosshair_vertical_width),
+        ("ecliptic-band-width", args.ecliptic_band_width),
+        ("date-ring-width-stroke", args.date_ring_width_stroke),
     ):
         if value is not None and value < 0:
             raise ValueError(f"{label} cannot be negative.")
+
+    if args.date_ring and not args.ecliptic:
+        raise ValueError("date-ring requires ecliptic output to be enabled.")
+    if args.date_ring_year <= 0:
+        raise ValueError("date-ring-year must be positive.")
 
     if args.azimuth_label_letter_spacing <= -LABEL_GLYPH_WIDTH:
         raise ValueError(
@@ -493,6 +604,542 @@ def sample_declination_line(
     return points
 
 
+def ecliptic_to_equatorial(ecliptic_longitude: float, ecliptic_latitude: float = 0.0) -> tuple[float, float]:
+    longitude = math.radians(ecliptic_longitude)
+    latitude = math.radians(ecliptic_latitude)
+    obliquity = math.radians(TROPIC_DECLINATION)
+    sin_declination = (
+        math.sin(latitude) * math.cos(obliquity)
+        + math.cos(latitude) * math.sin(obliquity) * math.sin(longitude)
+    )
+    declination = math.degrees(math.asin(clamp(sin_declination, -1.0, 1.0)))
+    right_ascension = math.degrees(
+        math.atan2(
+            math.sin(longitude) * math.cos(obliquity) - math.tan(latitude) * math.sin(obliquity),
+            math.cos(longitude),
+        )
+    )
+    return declination, right_ascension
+
+
+def sample_ecliptic_line(
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+    samples: int = 720,
+) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for index in range(samples + 1):
+        ecliptic_longitude = 360.0 * index / samples
+        declination, right_ascension = ecliptic_to_equatorial(ecliptic_longitude)
+        points.append(
+            project_point(
+                declination,
+                right_ascension,
+                center,
+                projection,
+                radius_scale,
+                canvas_radius,
+            )
+        )
+    return points
+
+
+def sample_ecliptic_point(
+    ecliptic_longitude: float,
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+ ) -> tuple[float, float]:
+    declination, right_ascension = ecliptic_to_equatorial(ecliptic_longitude)
+    return project_point(
+        declination,
+        right_ascension,
+        center,
+        projection,
+        radius_scale,
+        canvas_radius,
+    )
+
+
+def ecliptic_centroid(points: Sequence[tuple[float, float]]) -> tuple[float, float]:
+    if not points:
+        raise ValueError("Cannot compute the centroid of zero points.")
+    unique_points = points[:-1] if len(points) > 1 and points[0] == points[-1] else points
+    total_x = sum(point[0] for point in unique_points)
+    total_y = sum(point[1] for point in unique_points)
+    count = len(unique_points)
+    return total_x / count, total_y / count
+
+
+def default_ecliptic_band_width(
+    points: Sequence[tuple[float, float]], center: tuple[float, float]
+) -> float:
+    unique_points = points[:-1] if len(points) > 1 and points[0] == points[-1] else points
+    if not unique_points:
+        raise ValueError("Cannot compute the ecliptic band width from zero points.")
+    total_radius = sum(
+        math.hypot(point[0] - center[0], point[1] - center[1]) for point in unique_points
+    )
+    return total_radius / len(unique_points)
+
+
+def line_intersection(
+    first_start: tuple[float, float],
+    first_end: tuple[float, float],
+    second_start: tuple[float, float],
+    second_end: tuple[float, float],
+) -> tuple[float, float] | None:
+    x1, y1 = first_start
+    x2, y2 = first_end
+    x3, y3 = second_start
+    x4, y4 = second_end
+    denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if abs(denominator) < 1e-9:
+        return None
+    determinant_first = x1 * y2 - y1 * x2
+    determinant_second = x3 * y4 - y3 * x4
+    return (
+        (determinant_first * (x3 - x4) - (x1 - x2) * determinant_second) / denominator,
+        (determinant_first * (y3 - y4) - (y1 - y2) * determinant_second) / denominator,
+    )
+
+
+def circumcenter(
+    first: tuple[float, float],
+    second: tuple[float, float],
+    third: tuple[float, float],
+) -> tuple[float, float] | None:
+    ax, ay = first
+    bx, by = second
+    cx, cy = third
+    determinant = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    if abs(determinant) < 1e-9:
+        return None
+
+    first_square = ax * ax + ay * ay
+    second_square = bx * bx + by * by
+    third_square = cx * cx + cy * cy
+    return (
+        (
+            first_square * (by - cy)
+            + second_square * (cy - ay)
+            + third_square * (ay - by)
+        )
+        / determinant,
+        (
+            first_square * (cx - bx)
+            + second_square * (ax - cx)
+            + third_square * (bx - ax)
+        )
+        / determinant,
+    )
+
+
+def ecliptic_tick_source(
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+) -> tuple[float, float]:
+    vernal = sample_ecliptic_point(0.0, center, projection, radius_scale, canvas_radius)
+    autumnal = sample_ecliptic_point(180.0, center, projection, radius_scale, canvas_radius)
+    summer = sample_ecliptic_point(90.0, center, projection, radius_scale, canvas_radius)
+    winter = sample_ecliptic_point(270.0, center, projection, radius_scale, canvas_radius)
+    intersection = line_intersection(vernal, autumnal, summer, winter)
+    if intersection is None:
+        raise ValueError("Could not determine the ecliptic tick source.")
+    return intersection
+
+
+def ecliptic_circle_center(
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+) -> tuple[float, float]:
+    vernal = sample_ecliptic_point(0.0, center, projection, radius_scale, canvas_radius)
+    summer = sample_ecliptic_point(90.0, center, projection, radius_scale, canvas_radius)
+    autumnal = sample_ecliptic_point(180.0, center, projection, radius_scale, canvas_radius)
+    result = circumcenter(vernal, summer, autumnal)
+    if result is None:
+        raise ValueError("Could not determine the ecliptic circle center.")
+    return result
+
+
+def scale_closed_curve_toward_center(
+    points: Sequence[tuple[float, float]],
+    center: tuple[float, float],
+    target_radius: float,
+) -> list[tuple[float, float]]:
+    if target_radius < 0:
+        raise ValueError("Target radius must be non-negative.")
+
+    unique_points = list(points[:-1] if len(points) > 1 and points[0] == points[-1] else points)
+    scaled_points: list[tuple[float, float]] = []
+    for point in unique_points:
+        vector_x = point[0] - center[0]
+        vector_y = point[1] - center[1]
+        radius = math.hypot(vector_x, vector_y)
+        if radius < 1e-9:
+            scaled_points.append(center)
+            continue
+        scale = target_radius / radius
+        scaled_points.append((center[0] + vector_x * scale, center[1] + vector_y * scale))
+
+    if scaled_points:
+        scaled_points.append(scaled_points[0])
+    return scaled_points
+
+
+def build_ecliptic_tick(
+    ecliptic_longitude: float,
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+    tick_source: tuple[float, float],
+    inner_circle_center: tuple[float, float],
+    inner_radius: float,
+) -> list[tuple[float, float]] | None:
+    if inner_radius < 0:
+        return None
+
+    point = sample_ecliptic_point(
+        ecliptic_longitude, center, projection, radius_scale, canvas_radius
+    )
+    direction_x = point[0] - tick_source[0]
+    direction_y = point[1] - tick_source[1]
+    a = direction_x * direction_x + direction_y * direction_y
+    if a < 1e-9:
+        return None
+
+    relative_x = tick_source[0] - inner_circle_center[0]
+    relative_y = tick_source[1] - inner_circle_center[1]
+    b = 2.0 * (relative_x * direction_x + relative_y * direction_y)
+    c = relative_x * relative_x + relative_y * relative_y - inner_radius * inner_radius
+    discriminant = b * b - 4.0 * a * c
+    if discriminant < 0:
+        return None
+
+    root = math.sqrt(discriminant)
+    candidates = sorted(
+        t for t in ((-b - root) / (2.0 * a), (-b + root) / (2.0 * a)) if 0.0 <= t <= 1.0
+    )
+    if not candidates:
+        return None
+
+    t = max(candidates)
+    end_point = tick_source[0] + direction_x * t, tick_source[1] + direction_y * t
+    return [point, end_point]
+
+
+def normalize_degrees(angle: float) -> float:
+    return angle % 360.0
+
+
+def signed_angular_difference(first: float, second: float) -> float:
+    return ((first - second + 180.0) % 360.0) - 180.0
+
+
+def clockwise_angle(point: tuple[float, float], center: tuple[float, float]) -> float:
+    return math.degrees(math.atan2(point[1] - center[1], point[0] - center[0]))
+
+
+def scale_point_from_center(
+    point: tuple[float, float],
+    center: tuple[float, float],
+    target_radius: float,
+) -> tuple[float, float]:
+    vector_x = point[0] - center[0]
+    vector_y = point[1] - center[1]
+    radius = math.hypot(vector_x, vector_y)
+    if radius < 1e-9:
+        return center
+    scale = target_radius / radius
+    return center[0] + vector_x * scale, center[1] + vector_y * scale
+
+
+def is_leap_year(year: int) -> bool:
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+
+def fixed_365_day_index(current_date: dt.date) -> int:
+    month = current_date.month
+    day = current_date.day
+    if month == 2 and day == 29:
+        day = 28
+    month_start = sum(COMMON_MONTH_LENGTHS[: month - 1])
+    day_index = month_start + day - 1
+    if is_leap_year(current_date.year) and month > 2:
+        day_index -= 1
+    return day_index
+
+
+def true_solar_ecliptic_longitude(current_date: dt.date) -> float:
+    year = current_date.year
+    month = current_date.month
+    day = current_date.day
+    if month <= 2:
+        year -= 1
+        month += 12
+    century = math.floor(year / 100)
+    gregorian_correction = 2 - century + math.floor(century / 4)
+    julian_day = (
+        math.floor(365.25 * (year + 4716))
+        + math.floor(30.6001 * (month + 1))
+        + day
+        + gregorian_correction
+        - 1524.5
+        + 0.5
+    )
+    julian_centuries = (julian_day - 2451545.0) / 36525.0
+    mean_longitude = normalize_degrees(
+        280.46646 + julian_centuries * (36000.76983 + 0.0003032 * julian_centuries)
+    )
+    mean_anomaly = normalize_degrees(
+        357.52911 + julian_centuries * (35999.05029 - 0.0001537 * julian_centuries)
+    )
+    anomaly_radians = math.radians(mean_anomaly)
+    equation_of_center = (
+        math.sin(anomaly_radians)
+        * (1.914602 - julian_centuries * (0.004817 + 0.000014 * julian_centuries))
+        + math.sin(2.0 * anomaly_radians)
+        * (0.019993 - 0.000101 * julian_centuries)
+        + math.sin(3.0 * anomaly_radians) * 0.000289
+    )
+    true_longitude = mean_longitude + equation_of_center
+    omega = 125.04 - 1934.136 * julian_centuries
+    apparent_longitude = true_longitude - 0.00569 - 0.00478 * math.sin(math.radians(omega))
+    return normalize_degrees(apparent_longitude)
+
+
+def rendered_ecliptic_longitude_direction(
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+    circle_center: tuple[float, float],
+) -> str:
+    start = sample_ecliptic_point(0.0, center, projection, radius_scale, canvas_radius)
+    next_point = sample_ecliptic_point(1.0, center, projection, radius_scale, canvas_radius)
+    delta = signed_angular_difference(
+        clockwise_angle(next_point, circle_center),
+        clockwise_angle(start, circle_center),
+    )
+    return CLOCKWISE if delta >= 0 else COUNTERCLOCKWISE
+
+
+def resolved_ecliptic_rotation_direction(args: argparse.Namespace) -> str:
+    return args.ecliptic_rotation_direction or args.solar_motion_direction
+
+
+def displayed_ecliptic_longitude(
+    ecliptic_longitude: float,
+    rendered_longitude_direction: str,
+    rotation_direction: str,
+) -> float:
+    if rendered_longitude_direction == rotation_direction:
+        return normalize_degrees(ecliptic_longitude)
+    return normalize_degrees(-ecliptic_longitude)
+
+
+def date_ring_angle_for_day_index(
+    day_index: int,
+    vernal_angle: float,
+    rotation_direction: str,
+    phase_offset_degrees: float,
+) -> float:
+    direction_multiplier = 1.0 if rotation_direction == CLOCKWISE else -1.0
+    return normalize_degrees(
+        vernal_angle + direction_multiplier * (day_index * 360.0 / 365.0 + phase_offset_degrees)
+    )
+
+
+def date_ring_angle_for_date(
+    current_date: dt.date,
+    vernal_angle: float,
+    rotation_direction: str,
+    phase_offset_degrees: float,
+) -> float:
+    return date_ring_angle_for_day_index(
+        fixed_365_day_index(current_date), vernal_angle, rotation_direction, phase_offset_degrees
+    )
+
+
+def month_end_dates(year: int) -> list[dt.date]:
+    return [
+        dt.date(year, month_index + 1, month_length)
+        for month_index, month_length in enumerate(COMMON_MONTH_LENGTHS)
+    ]
+
+
+def date_ring_sub_tick_dates(year: int, interval: int) -> list[dt.date]:
+    if interval <= 0:
+        return []
+    sub_tick_dates: list[dt.date] = []
+    for month_index, month_length in enumerate(COMMON_MONTH_LENGTHS):
+        previous_month_end_index = -1 if month_index == 0 else COMMON_MONTH_END_DAY_INDICES[month_index - 1]
+        month_end_index = COMMON_MONTH_END_DAY_INDICES[month_index]
+        absolute_month_start_index = previous_month_end_index + 1
+        day_of_month_start = interval
+        for day_index in range(
+            absolute_month_start_index + day_of_month_start - 1, month_end_index, interval
+        ):
+            calendar_month_start_index = sum(COMMON_MONTH_LENGTHS[: month_index])
+            day_of_month = day_index - calendar_month_start_index + 1
+            if day_of_month <= 0 or day_of_month > month_length:
+                break
+            sub_tick_dates.append(dt.date(year, month_index + 1, day_of_month))
+    return sub_tick_dates
+
+
+def date_ring_tick_for_longitude(
+    angle: float,
+    circle_center: tuple[float, float],
+    date_ring_inner_radius: float,
+    date_ring_outer_radius: float,
+) -> list[tuple[float, float]]:
+    radians = math.radians(angle)
+    inner_point = (
+        circle_center[0] + date_ring_inner_radius * math.cos(radians),
+        circle_center[1] + date_ring_inner_radius * math.sin(radians),
+    )
+    outer_point = (
+        circle_center[0] + date_ring_outer_radius * math.cos(radians),
+        circle_center[1] + date_ring_outer_radius * math.sin(radians),
+    )
+    return [inner_point, outer_point]
+
+
+def format_date_ring_error_summary(
+    year: int,
+    phase_offset_degrees: float,
+    mean_absolute_error: float,
+    rms_error: float,
+    max_absolute_error: float,
+    max_linear_error: float,
+    worst_dates: Sequence[dt.date],
+) -> str:
+    formatted_worst_dates = ", ".join(current_date.isoformat() for current_date in worst_dates)
+    return (
+        "Date ring error summary\n"
+        f"  year: {year}\n"
+        f"  optimized phase offset: {phase_offset_degrees:.4f} deg\n"
+        f"  mean absolute angular error: {mean_absolute_error:.4f} deg\n"
+        f"  RMS angular error: {rms_error:.4f} deg\n"
+        f"  max absolute angular error: {max_absolute_error:.4f} deg\n"
+        f"  max linear error at date ring inner boundary: {max_linear_error:.4f} mm\n"
+        f"  worst date(s): {formatted_worst_dates}"
+    )
+
+
+def optimal_date_ring_phase_offset(
+    year: int,
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+    circle_center: tuple[float, float],
+    rotation_direction: str,
+) -> float:
+    vernal_point = sample_ecliptic_point(0.0, center, projection, radius_scale, canvas_radius)
+    vernal_angle = clockwise_angle(vernal_point, circle_center)
+    rendered_direction = rendered_ecliptic_longitude_direction(
+        center, projection, radius_scale, canvas_radius, circle_center
+    )
+    direction_multiplier = 1.0 if rotation_direction == CLOCKWISE else -1.0
+    signed_errors: list[float] = []
+
+    current_date = dt.date(year, 1, 1)
+    end_date = dt.date(year, 12, 31)
+    while current_date <= end_date:
+        true_longitude = true_solar_ecliptic_longitude(current_date)
+        displayed_longitude = displayed_ecliptic_longitude(
+            true_longitude, rendered_direction, rotation_direction
+        )
+        true_point = sample_ecliptic_point(
+            displayed_longitude, center, projection, radius_scale, canvas_radius
+        )
+        true_angle = clockwise_angle(true_point, circle_center)
+        base_angle = date_ring_angle_for_day_index(
+            fixed_365_day_index(current_date), vernal_angle, rotation_direction, 0.0
+        )
+        signed_errors.append(
+            signed_angular_difference(true_angle, base_angle) / direction_multiplier
+        )
+        current_date += dt.timedelta(days=1)
+
+    minimum_error = min(signed_errors)
+    maximum_error = max(signed_errors)
+    return (minimum_error + maximum_error) / 2.0
+
+
+def date_ring_error_summary(
+    year: int,
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+    circle_center: tuple[float, float],
+    counter_radius: float,
+    rotation_direction: str,
+) -> str:
+    vernal_point = sample_ecliptic_point(0.0, center, projection, radius_scale, canvas_radius)
+    vernal_angle = clockwise_angle(vernal_point, circle_center)
+    phase_offset_degrees = optimal_date_ring_phase_offset(
+        year, center, projection, radius_scale, canvas_radius, circle_center, rotation_direction
+    )
+    rendered_direction = rendered_ecliptic_longitude_direction(
+        center, projection, radius_scale, canvas_radius, circle_center
+    )
+    current_date = dt.date(year, 1, 1)
+    end_date = dt.date(year, 12, 31)
+    absolute_errors: list[float] = []
+    worst_dates: list[dt.date] = []
+    worst_error = -1.0
+
+    while current_date <= end_date:
+        modeled_angle = date_ring_angle_for_date(
+            current_date, vernal_angle, rotation_direction, phase_offset_degrees
+        )
+        true_longitude = true_solar_ecliptic_longitude(current_date)
+        displayed_longitude = displayed_ecliptic_longitude(
+            true_longitude, rendered_direction, rotation_direction
+        )
+        true_point = sample_ecliptic_point(
+            displayed_longitude, center, projection, radius_scale, canvas_radius
+        )
+        angular_error = abs(
+            signed_angular_difference(
+                modeled_angle,
+                clockwise_angle(true_point, circle_center),
+            )
+        )
+        absolute_errors.append(angular_error)
+        if angular_error > worst_error + 1e-9:
+            worst_error = angular_error
+            worst_dates = [current_date]
+        elif abs(angular_error - worst_error) <= 1e-9:
+            worst_dates.append(current_date)
+        current_date += dt.timedelta(days=1)
+
+    mean_absolute_error = sum(absolute_errors) / len(absolute_errors)
+    rms_error = math.sqrt(sum(error * error for error in absolute_errors) / len(absolute_errors))
+    max_linear_error = math.radians(worst_error) * counter_radius
+    return format_date_ring_error_summary(
+        year,
+        phase_offset_degrees,
+        mean_absolute_error,
+        rms_error,
+        worst_error,
+        max_linear_error,
+        worst_dates,
+    )
+
+
 def solar_rise_set_hour_angle(observer_latitude: float, declination: float) -> float | None:
     phi = math.radians(observer_latitude)
     dec = math.radians(declination)
@@ -604,7 +1251,7 @@ def add_path(
     parent: Element,
     points: Sequence[tuple[float, float]],
     stroke_width: float,
-    clip_id: str,
+    clip_id: str | None,
     closed: bool = False,
     dashed: bool = False,
 ) -> None:
@@ -616,10 +1263,11 @@ def add_path(
         "fill": "none",
         "stroke": "#000000",
         "stroke-width": f"{stroke_width:.4f}",
-        "clip-path": f"url(#{clip_id})",
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
     }
+    if clip_id is not None:
+        attributes["clip-path"] = f"url(#{clip_id})"
     if dashed:
         dash = max(stroke_width * 4.0, 0.2)
         gap = max(stroke_width * 3.0, 0.15)
@@ -1578,9 +2226,10 @@ def radius_scale_for_projection(canvas_radius: float, outer_angle: float, projec
     return canvas_radius / math.tan(math.radians(outer_angle) / 2.0)
 
 
-def build_svg(args: argparse.Namespace) -> ElementTree:
+def projection_geometry(args: argparse.Namespace) -> tuple[float, float, float, float]:
     crosshair_horizontal_width, crosshair_vertical_width = crosshair_widths(args)
     shared_twilight_width = twilight_width(args)
+    date_ring_width_stroke = (args.date_ring_width_stroke or args.ecliptic_width) if args.date_ring else 0.0
     margin = max(
         DEFAULT_CANVAS_MARGIN_MM,
         args.boundary_width,
@@ -1591,6 +2240,13 @@ def build_svg(args: argparse.Namespace) -> ElementTree:
         args.sub_altitude_width,
         shared_twilight_width,
         args.equator_tropics_width,
+        args.ecliptic_width,
+        args.ecliptic_angle_width,
+        args.sub_ecliptic_angle_width,
+        date_ring_width_stroke,
+        args.date_ring_month_width if args.date_ring else 0.0,
+        args.date_ring_sub_width if args.date_ring else 0.0,
+        args.date_ring_width if args.date_ring else 0.0,
         args.unequal_hour_width,
         crosshair_horizontal_width,
         crosshair_vertical_width,
@@ -1603,8 +2259,11 @@ def build_svg(args: argparse.Namespace) -> ElementTree:
     pole_sign = 1.0 if args.center == "north" else -1.0
     outer_angle = 90.0 - pole_sign * args.range_latitude
     radius_scale = radius_scale_for_projection(canvas_radius, outer_angle, args.projection)
-    clip_id = "projection-clip"
+    return margin, total_size, canvas_radius, center
 
+
+def create_svg_root(total_size: float) -> tuple[Element, str]:
+    clip_id = "projection-clip"
     root = Element(
         "svg",
         {
@@ -1614,7 +2273,10 @@ def build_svg(args: argparse.Namespace) -> ElementTree:
             "viewBox": f"0 0 {total_size:.4f} {total_size:.4f}",
         },
     )
+    return root, clip_id
 
+
+def add_projection_clip(root: Element, clip_id: str, center: float, canvas_radius: float) -> None:
     defs = SubElement(root, "defs")
     clip_path = SubElement(defs, "clipPath", {"id": clip_id})
     SubElement(
@@ -1627,10 +2289,24 @@ def build_svg(args: argparse.Namespace) -> ElementTree:
         },
     )
 
+
+def create_projection_group(root: Element, rotate_180: bool, center: float) -> Element:
     grid_attributes: dict[str, str] = {}
-    if args.rotate_180:
+    if rotate_180:
         grid_attributes["transform"] = f"rotate(180 {center:.4f} {center:.4f})"
-    grid = SubElement(root, "g", grid_attributes)
+    return SubElement(root, "g", grid_attributes)
+
+
+def build_svg(args: argparse.Namespace) -> ElementTree:
+    crosshair_horizontal_width, crosshair_vertical_width = crosshair_widths(args)
+    shared_twilight_width = twilight_width(args)
+    margin, total_size, canvas_radius, center = projection_geometry(args)
+    pole_sign = 1.0 if args.center == "north" else -1.0
+    outer_angle = 90.0 - pole_sign * args.range_latitude
+    radius_scale = radius_scale_for_projection(canvas_radius, outer_angle, args.projection)
+    root, clip_id = create_svg_root(total_size)
+    add_projection_clip(root, clip_id, center, canvas_radius)
+    grid = create_projection_group(root, args.rotate_180, center)
 
     if args.crosshair:
         add_line(
@@ -1820,9 +2496,201 @@ def build_svg(args: argparse.Namespace) -> ElementTree:
     return ElementTree(root)
 
 
+def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
+    _, total_size, canvas_radius, center = projection_geometry(args)
+    pole_sign = 1.0 if args.center == "north" else -1.0
+    outer_angle = 90.0 - pole_sign * args.range_latitude
+    radius_scale = radius_scale_for_projection(canvas_radius, outer_angle, args.projection)
+    counter_center = (center, center)
+    root, clip_id = create_svg_root(total_size)
+    add_projection_clip(root, clip_id, center, canvas_radius)
+    grid = create_projection_group(root, args.rotate_180, center)
+    ecliptic = sample_ecliptic_line(
+        args.center,
+        args.projection,
+        radius_scale,
+        center,
+    )
+    ecliptic_clip_id = "ecliptic-clip"
+    defs = root.find("defs")
+    if defs is None:
+        raise ValueError("SVG defs node is missing.")
+    ecliptic_clip_path = SubElement(defs, "clipPath", {"id": ecliptic_clip_id})
+    SubElement(
+        ecliptic_clip_path,
+        "path",
+        {
+            "d": points_to_path(ecliptic, closed=True),
+        },
+    )
+    circle_center = ecliptic_circle_center(args.center, args.projection, radius_scale, center)
+    rendered_direction = rendered_ecliptic_longitude_direction(
+        args.center, args.projection, radius_scale, center, circle_center
+    )
+    rotation_direction = resolved_ecliptic_rotation_direction(args)
+    tick_source = ecliptic_tick_source(args.center, args.projection, radius_scale, center)
+    outer_radius = default_ecliptic_band_width(ecliptic, circle_center)
+    date_ring_boundary_width = args.date_ring_width_stroke or args.ecliptic_width
+    band_width = (
+        args.ecliptic_band_width
+        if args.ecliptic_band_width is not None
+        else outer_radius
+    )
+    inner_radius = max(outer_radius - band_width, 0.0)
+    inner_ecliptic = scale_closed_curve_toward_center(ecliptic, circle_center, inner_radius)
+    if args.ecliptic_angle_lines > 0 and args.sub_ecliptic_angle_lines > 1:
+        sub_ecliptic_angles = subdivided_interval_values(
+            args.ecliptic_angle_lines, args.sub_ecliptic_angle_lines, 360.0
+        )
+        for ecliptic_angle in sub_ecliptic_angles:
+            tick = build_ecliptic_tick(
+                displayed_ecliptic_longitude(
+                    ecliptic_angle, rendered_direction, rotation_direction
+                ),
+                args.center,
+                args.projection,
+                radius_scale,
+                center,
+                tick_source,
+                circle_center,
+                inner_radius,
+            )
+            if tick is not None:
+                add_path(grid, tick, args.sub_ecliptic_angle_width, ecliptic_clip_id)
+    if args.ecliptic_angle_lines > 0:
+        ecliptic_angles = values_at_interval(args.ecliptic_angle_lines, 0.0, 360.0)
+        for ecliptic_angle in ecliptic_angles:
+            tick = build_ecliptic_tick(
+                displayed_ecliptic_longitude(
+                    ecliptic_angle, rendered_direction, rotation_direction
+                ),
+                args.center,
+                args.projection,
+                radius_scale,
+                center,
+                tick_source,
+                circle_center,
+                inner_radius,
+            )
+            if tick is not None:
+                add_path(grid, tick, args.ecliptic_angle_width, ecliptic_clip_id)
+    add_path(grid, ecliptic, args.ecliptic_width, clip_id, closed=True)
+    add_path(grid, inner_ecliptic, args.ecliptic_width, clip_id, closed=True)
+    if args.date_ring:
+        date_ring_inner_radius = canvas_radius
+        date_ring_outer_radius = canvas_radius + args.date_ring_width
+        vernal_point = sample_ecliptic_point(0.0, args.center, args.projection, radius_scale, center)
+        vernal_angle = clockwise_angle(vernal_point, counter_center)
+        phase_offset_degrees = optimal_date_ring_phase_offset(
+            args.date_ring_year,
+            args.center,
+            args.projection,
+            radius_scale,
+            center,
+            counter_center,
+            rotation_direction,
+        )
+        SubElement(
+            grid,
+            "circle",
+            {
+                "cx": f"{center:.4f}",
+                "cy": f"{center:.4f}",
+                "r": f"{date_ring_inner_radius:.4f}",
+                "fill": "none",
+                "stroke": "#000000",
+                "stroke-width": f"{date_ring_boundary_width:.4f}",
+            },
+        )
+        SubElement(
+            grid,
+            "circle",
+            {
+                "cx": f"{center:.4f}",
+                "cy": f"{center:.4f}",
+                "r": f"{date_ring_outer_radius:.4f}",
+                "fill": "none",
+                "stroke": "#000000",
+                "stroke-width": f"{date_ring_boundary_width:.4f}",
+            },
+        )
+
+        for month_end in month_end_dates(args.date_ring_year):
+            month_angle = date_ring_angle_for_date(
+                month_end,
+                vernal_angle,
+                rotation_direction,
+                phase_offset_degrees,
+            )
+            tick = date_ring_tick_for_longitude(
+                month_angle,
+                counter_center,
+                date_ring_inner_radius,
+                date_ring_outer_radius,
+            )
+            add_path(grid, tick, args.date_ring_month_width, None)
+
+        if args.date_ring_sub_interval > 0:
+            for sub_tick_date in date_ring_sub_tick_dates(
+                args.date_ring_year, args.date_ring_sub_interval
+            ):
+                sub_angle = date_ring_angle_for_date(
+                    sub_tick_date,
+                    vernal_angle,
+                    rotation_direction,
+                    phase_offset_degrees,
+                )
+                tick = date_ring_tick_for_longitude(
+                    sub_angle,
+                    counter_center,
+                    date_ring_inner_radius,
+                    date_ring_outer_radius,
+                )
+                add_path(grid, tick, args.date_ring_sub_width, None)
+    if args.boundary_width > 0:
+        SubElement(
+            root,
+            "circle",
+            {
+                "cx": f"{center:.4f}",
+                "cy": f"{center:.4f}",
+                "r": f"{canvas_radius:.4f}",
+                "fill": "none",
+                "stroke": "#000000",
+                "stroke-width": f"{args.boundary_width:.4f}",
+            },
+        )
+    return ElementTree(root)
+
+
+def ecliptic_output_path(output_path: Path) -> Path:
+    return output_path.with_name(f"{output_path.stem}_ecliptic{output_path.suffix}")
+
+
 def main(projection: str) -> None:
     args = parse_args(projection)
     validate_args(args)
     tree = build_svg(args)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     tree.write(args.output, encoding="utf-8", xml_declaration=True)
+    if args.ecliptic:
+        build_ecliptic_svg(args).write(ecliptic_output_path(args.output), encoding="utf-8", xml_declaration=True)
+        if args.date_ring:
+            _, _, canvas_radius, center = projection_geometry(args)
+            pole_sign = 1.0 if args.center == "north" else -1.0
+            outer_angle = 90.0 - pole_sign * args.range_latitude
+            radius_scale = radius_scale_for_projection(canvas_radius, outer_angle, args.projection)
+            counter_center = (center, center)
+            counter_radius = canvas_radius
+            print(
+                date_ring_error_summary(
+                    args.date_ring_year,
+                    args.center,
+                    args.projection,
+                    radius_scale,
+                    center,
+                    counter_center,
+                    counter_radius,
+                    resolved_ecliptic_rotation_direction(args),
+                )
+            )
