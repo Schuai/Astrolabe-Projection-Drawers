@@ -63,6 +63,41 @@ Official pixi docs:
 - Installation: https://pixi.prefix.dev/latest/installation/
 - `pixi install`: https://pixi.prefix.dev/latest/reference/cli/pixi/install/
 
+## Desktop GUI
+
+Start the integrated desktop application with:
+
+```powershell
+pixi run gui
+```
+
+The first two tabs expose the azimuthal-equidistant and stereographic drawing
+tasks. Basic arguments remain visible; dependent controls appear only when their
+parent feature is enabled. Hover over an argument name for its description, then
+press **Update Preview** to render without overwriting a file. When ecliptic
+output is enabled, the main and companion drawings have separate preview tabs.
+
+The perspective-correction tab loads an image directly into the application.
+Click four corners in order, then update the preview to rectify the quadrilateral
+to a square. Points can be undone or reset before correction.
+
+Use **File > Import Configuration** to open a README/text/PowerShell file or to
+paste a `pixi run` command, a PowerShell `@(...)` argument list, or plain CLI
+arguments. Imported text is parsed but never executed. **Save** and **Save As**
+export SVG, transparent PNG, or white-background JPEG; raster projection output
+uses the DPI selected under **Settings > Raster Export DPI** (300 by default).
+Ecliptic output is saved beside the main image with an
+`_ecliptic` suffix.
+
+Use **File > Export Configuration** to save the active drawing tab to a `.txt`
+file containing a README-compatible PowerShell `pixi run ... -- @(...)`
+command. Only currently effective arguments are written, and the exported file
+can be imported again.
+
+The interface starts in English. Use **Settings > Language** to switch the
+entire application between English and Chinese; the selection takes effect
+immediately and is remembered for the next launch.
+
 ## Azimuthal Equidistant
 
 Use `draw_azimuthal_equidistant.py` through the `draw-azimuthal-equidistant` task:
@@ -267,7 +302,7 @@ Use `--ecliptic` to write the ecliptic as a separate companion SVG for the same 
 
 ```powershell
 pixi run draw-stereographic -- @(
-  "--latitude", "49.86667",
+  "--latitude", "50",
   "--center", "south",
   "--range-latitude", "23.5",
   "--diameter", "40",

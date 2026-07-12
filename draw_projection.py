@@ -5,6 +5,7 @@ import datetime as dt
 import math
 from pathlib import Path
 from typing import Iterable, Sequence
+from io import BytesIO
 from xml.etree.ElementTree import Element, ElementTree, SubElement
 
 
@@ -37,7 +38,7 @@ def clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
 
-def parse_args(projection: str) -> argparse.Namespace:
+def build_parser(projection: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=PROJECTION_DESCRIPTIONS[projection])
     parser.add_argument("--latitude", type=float, required=True, help="Observer latitude in degrees.")
     parser.add_argument(
@@ -445,9 +446,22 @@ def parse_args(projection: str) -> argparse.Namespace:
         default=PROJECTION_OUTPUTS[projection],
         help="Output SVG path.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def parse_args(projection: str, argv: Sequence[str] | None = None) -> argparse.Namespace:
+    args = build_parser(projection).parse_args(argv)
     args.projection = projection
     return args
+
+
+def svg_bytes(args: argparse.Namespace, *, ecliptic: bool = False) -> bytes:
+    """Build a projection as UTF-8 SVG without writing a user file."""
+    validate_args(args)
+    tree = build_ecliptic_svg(args) if ecliptic else build_svg(args)
+    output = BytesIO()
+    tree.write(output, encoding="utf-8", xml_declaration=True)
+    return output.getvalue()
 
 
 def validate_args(args: argparse.Namespace) -> None:
@@ -861,6 +875,65 @@ def scale_closed_curve_toward_center(
     return scaled_points
 
 
+def offset_closed_curve_toward_center(
+    points: Sequence[tuple[float, float]],
+    center: tuple[float, float],
+    distance: float,
+) -> list[tuple[float, float]]:
+    """Offset a sampled closed curve by a constant normal distance toward its interior."""
+    if distance < 0:
+        raise ValueError("Offset distance must be non-negative.")
+    is_closed = len(points) > 1 and math.dist(points[0], points[-1]) < 1e-9
+    unique = list(points[:-1] if is_closed else points)
+    if len(unique) < 3:
+        return list(points)
+    result: list[tuple[float, float]] = []
+    for index, point in enumerate(unique):
+        previous = unique[(index - 1) % len(unique)]
+        following = unique[(index + 1) % len(unique)]
+        tangent_x = following[0] - previous[0]
+        tangent_y = following[1] - previous[1]
+        tangent_length = math.hypot(tangent_x, tangent_y)
+        if tangent_length < 1e-12:
+            result.append(point)
+            continue
+        normal_x = -tangent_y / tangent_length
+        normal_y = tangent_x / tangent_length
+        toward_x = center[0] - point[0]
+        toward_y = center[1] - point[1]
+        if normal_x * toward_x + normal_y * toward_y < 0:
+            normal_x = -normal_x
+            normal_y = -normal_y
+        result.append((point[0] + normal_x * distance, point[1] + normal_y * distance))
+    result.append(result[0])
+    return result
+
+
+def offset_ecliptic_point_toward_center(
+    ecliptic_longitude: float,
+    center: str,
+    projection: str,
+    radius_scale: float,
+    canvas_radius: float,
+    interior_center: tuple[float, float],
+    distance: float,
+) -> tuple[float, float]:
+    """Return the constant-distance inward offset at one ecliptic longitude."""
+    step = 0.01
+    point = sample_ecliptic_point(ecliptic_longitude, center, projection, radius_scale, canvas_radius)
+    previous = sample_ecliptic_point(ecliptic_longitude - step, center, projection, radius_scale, canvas_radius)
+    following = sample_ecliptic_point(ecliptic_longitude + step, center, projection, radius_scale, canvas_radius)
+    tangent_x = following[0] - previous[0]
+    tangent_y = following[1] - previous[1]
+    tangent_length = math.hypot(tangent_x, tangent_y)
+    if tangent_length < 1e-12:
+        return point
+    normal_x, normal_y = -tangent_y / tangent_length, tangent_x / tangent_length
+    if normal_x * (interior_center[0] - point[0]) + normal_y * (interior_center[1] - point[1]) < 0:
+        normal_x, normal_y = -normal_x, -normal_y
+    return point[0] + normal_x * distance, point[1] + normal_y * distance
+
+
 def build_ecliptic_tick(
     ecliptic_longitude: float,
     center: str,
@@ -870,6 +943,7 @@ def build_ecliptic_tick(
     tick_source: tuple[float, float],
     inner_circle_center: tuple[float, float],
     inner_radius: float,
+    band_width: float | None = None,
 ) -> list[tuple[float, float]] | None:
     if inner_radius < 0:
         return None
@@ -877,6 +951,17 @@ def build_ecliptic_tick(
     point = sample_ecliptic_point(
         ecliptic_longitude, center, projection, radius_scale, canvas_radius
     )
+    if projection == AZIMUTHAL_EQUIDISTANT and band_width is not None:
+        end_point = offset_ecliptic_point_toward_center(
+            ecliptic_longitude,
+            center,
+            projection,
+            radius_scale,
+            canvas_radius,
+            inner_circle_center,
+            band_width,
+        )
+        return [point, end_point]
     direction_x = point[0] - tick_source[0]
     direction_y = point[1] - tick_source[1]
     a = direction_x * direction_x + direction_y * direction_y
@@ -2691,7 +2776,10 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
         else outer_radius
     )
     inner_radius = max(outer_radius - band_width, 0.0)
-    inner_ecliptic = scale_closed_curve_toward_center(ecliptic, circle_center, inner_radius)
+    if args.projection == AZIMUTHAL_EQUIDISTANT:
+        inner_ecliptic = offset_closed_curve_toward_center(ecliptic, circle_center, band_width)
+    else:
+        inner_ecliptic = scale_closed_curve_toward_center(ecliptic, circle_center, inner_radius)
     if args.ecliptic_angle_lines > 0 and args.sub_ecliptic_angle_lines > 1:
         sub_ecliptic_angles = subdivided_interval_values(
             args.ecliptic_angle_lines, args.sub_ecliptic_angle_lines, 360.0
@@ -2708,6 +2796,7 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
                 tick_source,
                 circle_center,
                 inner_radius,
+                band_width,
             )
             if tick is not None:
                 add_path(grid, tick, args.sub_ecliptic_angle_width, ecliptic_clip_id)
@@ -2725,6 +2814,7 @@ def build_ecliptic_svg(args: argparse.Namespace) -> ElementTree:
                 tick_source,
                 circle_center,
                 inner_radius,
+                band_width,
             )
             if tick is not None:
                 add_path(grid, tick, args.ecliptic_angle_width, ecliptic_clip_id)
