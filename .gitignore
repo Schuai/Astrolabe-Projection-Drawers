@@ -18,6 +18,8 @@ sample.svg
 Darmstadt.svg
 !example/
 !example/ecliptic.svg
+!example/azimuthal_equidistant.svg
+!example/stereographic.svg
 /output/
 /star-data/
 /.astrolabe-cache/

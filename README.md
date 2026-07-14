@@ -252,7 +252,7 @@ pixi run draw-azimuthal-equidistant -- @(
 )
 ```
 
-![Azimuthal equidistant example](output/readme_azimuthal_equidistant.svg)
+![Azimuthal equidistant example](example/azimuthal_equidistant.svg)
 
 ## Notes
 
@@ -360,7 +360,7 @@ pixi run draw-stereographic -- @(
 )
 ```
 
-![Stereographic example](output/readme_stereographic.svg)
+![Stereographic example](example/stereographic.svg)
 
 - `scripts/draw_stereographic.py` keeps the same CLI as `scripts/draw_azimuthal_equidistant.py`.
 - In stereographic projection, the antipodal pole diverges to infinity, so `--range-latitude` cannot be the opposite pole itself.
