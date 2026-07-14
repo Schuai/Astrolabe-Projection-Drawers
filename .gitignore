@@ -16,8 +16,12 @@ azimuthal_equidistant_*.svg
 crosshair_*.svg
 sample.svg
 Darmstadt.svg
-!examples/azimuthal_equidistant.svg
-!examples/stereographic.svg
+!example/
+!example/ecliptic.svg
+/output/
+/star-data/
+/.astrolabe-cache/
+/src/
 
 # Large local artifacts
 *.png

@@ -65,17 +65,26 @@ Official pixi docs:
 
 ## Desktop GUI
 
+Ad astra abyssosque—welcome to this astrolabe design assistant!
+
 Start the integrated desktop application with:
 
 ```powershell
 pixi run gui
 ```
 
-The first two tabs expose the azimuthal-equidistant and stereographic drawing
-tasks. Basic arguments remain visible; dependent controls appear only when their
-parent feature is enabled. Hover over an argument name for its description, then
-press **Update Preview** to render without overwriting a file. When ecliptic
-output is enabled, the main and companion drawings have separate preview tabs.
+The two drawing workspaces are **Azimuthal Equidistant** and **Stereographic**.
+Each workspace has peer **Main**, **Ecliptic**, and **Star Chart** preview tabs.
+The shared parameter panel remains visible and is ordered into the same three
+sections; switching a preview tab automatically scrolls the panel to its section.
+Star Chart geometry does not duplicate the workspace controls: center pole,
+boundary latitude, projection, diameter, and boundary width are inherited from
+the Main section and are written into the exported Star Chart command.
+Dependent controls still appear only when their parent feature is enabled. Hover
+over an argument name for its description, then press **Update Preview** to render
+all three previews in the current projection workspace without changing the
+selected preview tab or overwriting a file. Each preview is updated independently;
+if one render fails, its last valid image is retained while the others still update.
 
 The perspective-correction tab loads an image directly into the application.
 Click four corners in order, then update the preview to rectify the quadrilateral
@@ -84,23 +93,116 @@ to a square. Points can be undone or reset before correction.
 Use **File > Import Configuration** to open a README/text/PowerShell file or to
 paste a `pixi run` command, a PowerShell `@(...)` argument list, or plain CLI
 arguments. Imported text is parsed but never executed. **Save** and **Save As**
-export SVG, transparent PNG, or white-background JPEG; raster projection output
+export the currently selected Main, Ecliptic, or Star Chart preview as SVG,
+transparent PNG, or white-background JPEG; raster projection output
 uses the DPI selected under **Settings > Raster Export DPI** (300 by default).
-Ecliptic output is saved beside the main image with an
-`_ecliptic` suffix.
 
-Use **File > Export Configuration** to save the active drawing tab to a `.txt`
-file containing a README-compatible PowerShell `pixi run ... -- @(...)`
-command. Only currently effective arguments are written, and the exported file
-can be imported again.
+Use **File > Export Configuration** to save the complete active projection
+workspace to a `.txt` file. It contains both the projection command (Main and
+Ecliptic sections) and the Star Chart command. Importing that file restores all
+three sections together.
 
 The interface starts in English. Use **Settings > Language** to switch the
 entire application between English and Chinese; the selection takes effect
 immediately and is remembered for the next launch.
 
+Each workspace's **Star Chart** tab uses locally cached HYG and Stellarium data. Open
+**Settings > Astronomical Data** to download/update the cache, clear it, or open
+its folder. Updating a preview never starts a network request. Star size uses
+only brightest- and faintest-level diameter fields, with intermediate levels
+linearly interpolated;
+line, star-name, constellation-name, font, position, and label-avoidance controls
+appear only when relevant.
+
+## Polar Star Chart (HYG + Stellarium)
+
+Download the astronomical data explicitly before the first render:
+
+```powershell
+pixi run download-star-data
+```
+
+By default the data are stored inside this repository under `src/`: HYG is in
+`src/hyg/`, Stellarium cultures are in `src/stellarium/`, and the integrity
+manifest is `src/manifest.json`. The entire generated `src/` directory is ignored
+by Git. The cache contains HYG 4.1 and the Stellarium 26.1 sky-culture files together
+with a `manifest.json` recording their versions, source URLs, download time,
+SHA-256 hashes, and licenses. The data are not committed to this repository.
+Use `--data-cache` on either command to select a different cache directory.
+
+```powershell
+pixi run draw-star-chart -- @(
+  "--center", "north",
+  "--range-declination", "-30",
+  "--projection", "azimuthal-equidistant",
+  "--diameter", "120",
+  "--boundary-width", "0.2",
+  "--rotation", "0",
+  "--rotation-direction", "counterclockwise",
+  "--epoch-year", "2026",
+  "--magnitude-max", "5.0",
+  "--magnitude-levels", "5",
+  "--star-diameter-max", "0.7",
+  "--star-diameter-min", "0.2",
+  "--star-stroke-width", "0.1",
+  "--fill-stars",
+  "--constellation-lines",
+  "--sky-culture", "modern",
+  "--constellation-width", "0.1",
+  "--no-show-star-names",
+  "--no-show-constellation-names",
+  "--avoid-label-overlap",
+  "--output", "output/star_chart.svg"
+)
+```
+
+`--center` selects the north or south pole. `--range-declination` is the signed
+declination at the circular edge, and `--projection` accepts
+`azimuthal-equidistant` or `stereographic`. Right ascension 0h starts at the top;
+`--rotation-direction` selects whether it increases clockwise or counterclockwise,
+and `--rotation` applies an additional angular offset to the complete chart. In
+the GUI workspace both controls are hidden: the offset is zero and the direction
+follows `--ecliptic-rotation-direction`, or `--solar-motion-direction` when the
+former is Automatic.
+
+`--magnitude-max` is the only magnitude cutoff: every stellar object with a
+visual magnitude less than or equal to it is included. The HYG convenience row
+for the Sun is excluded. For sizing, the normal stellar range beginning at
+`-1.5` is split into equal-width levels; any still-brighter star is assigned to
+the brightest level. `--star-diameter-max` sets the brightest-level size and
+`--star-diameter-min` sets the faintest-level size; all intermediate level
+diameters are linearly interpolated. The old comma-separated `--star-diameters`
+option remains accepted for configuration compatibility but is no longer shown
+or exported by the GUI. Boolean switches support
+their `--no-...` forms. Constellation segments are drawn only when both endpoint
+stars satisfy the magnitude upper limit, and each segment is geometrically
+clipped to the circular declination boundary. An edge with both endpoints outside
+the declination range is omitted, preventing an exterior projected chord from
+falsely crossing the whole chart. Only the culture's official
+`constellations` collection is used; Stellarium's optional `asterisms` and
+internal ray helpers are excluded. Star names and constellation/cultural-figure names have
+independent language, system font, size, preferred eight-direction position,
+radial offset, and tangential offset options. Automatic collision avoidance is
+enabled by default; labels that cannot be placed are omitted and counted in the
+render summary.
+
+`--star-name-language` and `--constellation-name-language` independently accept
+`en` or `zh`. These choices control text in the generated chart and never follow
+or change with the desktop GUI language.
+
+HYG 4.1 positions are interpreted at J2000. Astropy applies available space
+motion and precession to `--epoch-year`; stars without complete distance or
+radial-velocity information still use the available angular motion and are
+reported as degraded. [HYG 4.1](https://github.com/astronexus/HYG-Database/tree/main/hyg)
+is distributed under CC BY-SA 4.0. Sky-culture files come from the
+[Stellarium 26.1](https://github.com/Stellarium/stellarium/releases/tag/v26.1)
+GPL-2.0 project, while individual contributed sky cultures may state additional
+licenses. Review the preserved culture license files and the source/license
+entries in the cache manifest when redistributing derived work.
+
 ## Azimuthal Equidistant
 
-Use `draw_azimuthal_equidistant.py` through the `draw-azimuthal-equidistant` task:
+Use `scripts/draw_azimuthal_equidistant.py` through the `draw-azimuthal-equidistant` task:
 
 ```powershell
 pixi run draw-azimuthal-equidistant -- @(
@@ -146,11 +248,11 @@ pixi run draw-azimuthal-equidistant -- @(
   "--crosshair",
   "--crosshair-horizontal-width", "0.1",
   "--crosshair-vertical-width", "0.15",
-  "--output", "examples/azimuthal_equidistant.svg"
+  "--output", "output/readme_azimuthal_equidistant.svg"
 )
 ```
 
-![Azimuthal equidistant example](examples/azimuthal_equidistant.svg)
+![Azimuthal equidistant example](output/readme_azimuthal_equidistant.svg)
 
 ## Notes
 
@@ -208,7 +310,7 @@ pixi run draw-azimuthal-equidistant -- @(
 
 ## Stereographic
 
-Use `draw_stereographic.py` through the `draw-stereographic` task. It accepts the same arguments as the azimuthal-equidistant drawer:
+Use `scripts/draw_stereographic.py` through the `draw-stereographic` task. It accepts the same arguments as the azimuthal-equidistant drawer:
 
 ```powershell
 pixi run draw-stereographic -- @(
@@ -254,13 +356,13 @@ pixi run draw-stereographic -- @(
   "--crosshair",
   "--crosshair-horizontal-width", "0.1",
   "--crosshair-vertical-width", "0.15",
-  "--output", "examples/stereographic.svg"
+  "--output", "output/readme_stereographic.svg"
 )
 ```
 
-![Stereographic example](examples/stereographic.svg)
+![Stereographic example](output/readme_stereographic.svg)
 
-- `draw_stereographic.py` keeps the same CLI as `draw_azimuthal_equidistant.py`.
+- `scripts/draw_stereographic.py` keeps the same CLI as `scripts/draw_azimuthal_equidistant.py`.
 - In stereographic projection, the antipodal pole diverges to infinity, so `--range-latitude` cannot be the opposite pole itself.
 
 ## Ecliptic
@@ -331,20 +433,22 @@ pixi run draw-stereographic -- @(
   "--date-ring-month-label-arc-adjust", "0.0",
   "--date-ring-month-label-letter-spacing", "0.6",
   "--date-ring-year", "2026",
-  "--output", "examples/stereographic.svg"
+  "--output", "output/ecliptic_projection.svg"
 )
 ```
 
 This produces:
 
-- `examples/stereographic.svg`
-- `examples/stereographic_ecliptic.svg`
+- `output/ecliptic_projection.svg`
+- `output/ecliptic_projection_ecliptic.svg`
+
+![Ecliptic example](example/ecliptic.svg)
 
 The companion ecliptic file uses the main `--output` filename with an added `_ecliptic` suffix before `.svg`.
 
 ## Image Rectifier
 
-Use `perspective_corrector.py` through the `perspective-correct` task:
+Use `scripts/perspective_corrector.py` through the `perspective-correct` task:
 
 ```powershell
 pixi run perspective-correct -- --input-path "E:\path\to\input.png" --save-path "E:\path\to\output.png"
