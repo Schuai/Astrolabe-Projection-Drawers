@@ -282,6 +282,24 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual((tab.value("magnitude_max"),tab.value("magnitude_levels"),tab.value("star_diameter_max"),tab.value("star_diameter_min")),(5.0,5,0.7,0.2))
         tab.close()
 
+    def test_star_chart_reference_curve_controls_and_config(self):
+        from astrolabe_gui import StarChartTab
+        tab = StarChartTab(lambda: "zh")
+        clone = StarChartTab(lambda: "zh")
+        try:
+            for curve in ("equator", "ecliptic", "milky_way"):
+                self.assertFalse(tab.value(curve))
+                self.assertTrue(tab.rows[curve + "_width"][0].isHidden())
+                tab.set_value(curve, True)
+                tab.set_value(curve + "_width", 0.27)
+                self.assertFalse(tab.rows[curve + "_width"][0].isHidden())
+            clone.import_args(tab.export_args())
+            for curve in ("equator", "ecliptic", "milky_way"):
+                self.assertTrue(getattr(clone.namespace(), curve))
+                self.assertEqual(clone.value(curve + "_width"), 0.27)
+        finally:
+            tab.close(); clone.close()
+
     def test_legacy_per_level_diameters_import_as_endpoints(self):
         from astrolabe_gui import StarChartTab
         tab=StarChartTab(lambda:"en")
@@ -317,9 +335,9 @@ class LanguageTests(unittest.TestCase):
         from astrolabe_gui import ProjectionWorkspace, tokenize_workspace_config
         from draw_star_chart import build_parser as build_star_parser
         workspace = ProjectionWorkspace("draw-stereographic", STEREOGRAPHIC, lambda: "en")
-        self.assertEqual(workspace.pages.count(), 3)
-        self.assertEqual([workspace.pages.tabText(i) for i in range(3)], ["Main", "Ecliptic", "Star Chart"])
-        self.assertEqual([section.title() for section in workspace.sections], ["Main", "Ecliptic", "Star Chart"])
+        self.assertEqual(workspace.pages.count(), 5)
+        self.assertEqual([workspace.pages.tabText(i) for i in range(5)], ["Main", "Ecliptic", "Star Chart", "Back", "Ruler"])
+        self.assertEqual([section.title() for section in workspace.sections], ["Main", "Ecliptic", "Star Chart", "Back", "Ruler"])
         self.assertTrue(workspace.projection_controls.rows["ecliptic"][0].isHidden())
         self.assertFalse(workspace.projection_controls.rows["azimuth_lines"][0].isHidden())
         self.assertFalse(workspace.projection_controls.rows["date_ring"][0].isHidden())
@@ -339,7 +357,7 @@ class LanguageTests(unittest.TestCase):
         workspace.projection_controls.set_value("latitude", 42.25)
         workspace.star_chart.set_value("magnitude_max", 5.75)
         commands = tokenize_workspace_config(workspace.export_config_text())
-        self.assertEqual([command[0] for command in commands], ["draw-stereographic", "draw-star-chart"])
+        self.assertEqual([command[0] for command in commands], ["draw-stereographic", "draw-star-chart", "draw-astrolabe-back", "draw-astrolabe-ruler"])
         self.assertIn("--ecliptic", commands[0]); self.assertIn("--projection", commands[1])
         exported_star = build_star_parser().parse_args(commands[1][1:])
         self.assertEqual((exported_star.center, exported_star.range_declination, exported_star.diameter, exported_star.boundary_width), ("north", -42.0, 88.0, 0.35))

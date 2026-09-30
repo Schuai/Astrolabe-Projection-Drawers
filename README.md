@@ -130,6 +130,38 @@ with a `manifest.json` recording their versions, source URLs, download time,
 SHA-256 hashes, and licenses. The data are not committed to this repository.
 Use `--data-cache` on either command to select a different cache directory.
 
+The star chart can overlay the celestial equator (`--equator`) and ecliptic
+(`--ecliptic`) independently; both default to off. Set their stroke widths in
+millimeters with `--equator-width` and `--ecliptic-width` (default `0.1`). The GUI
+provides matching “叠加赤道” and “叠加黄道” checkboxes with width controls. Both curves
+follow the chart projection and rotation and are clipped to its circular boundary.
+The ecliptic uses the same fixed obliquity as the existing projection charts.
+
+Enable **叠加银河轮廓线** in the star-chart GUI, or pass `--milky-way` on the
+command line. `--milky-way-width` sets the line width in millimeters (default
+`0.1`). The overlay defaults to off and draws all five brightness contour levels
+without fill, with precession to the chart year and clipping to its boundary.
+Both projections, poles, and rotation directions are supported.
+
+The source is [d3-celestial's `data/mw.json`](https://github.com/ofrohn/d3-celestial/blob/7e720a3de062059d4c5400a379146a601d9010e0/data/mw.json),
+converted from Jose R. Vieira's **Milky Way Outline Catalog**. Its GeoJSON
+coordinates are J2000 right ascension (degrees, wrapped to −180…180) and
+declination. The d3-celestial project declares BSD-3-Clause; its license and
+upstream source attribution are preserved as `src/milkyway/LICENSE` and
+`src/milkyway/SOURCE.md`. The cache manifest records the fixed revision, source
+URL, and file hashes. See the source attribution as well as the project license
+when redistributing data.
+
+**设置 → 天文数据 → 下载／更新** includes the outlines. To add only this small
+dataset to an existing cache, run:
+
+```powershell
+pixi run download-star-data --milky-way-only
+pixi run draw-star-chart --milky-way --milky-way-width 0.1
+```
+
+Rendering uses the local `src/milkyway/mw.json` cache and does not access the network.
+
 ```powershell
 pixi run draw-star-chart -- @(
   "--center", "north",
@@ -483,3 +515,99 @@ The script opens an interactive OpenCV window for manual rectification.
 - `c` mode is currently not implemented.
 - Three points on a circle are not enough to recover a reliable perspective rectification uniquely.
 - If circle-based rectification is needed later, the workflow should use more points and ellipse fitting or additional geometric constraints.
+
+## Astrolabe Back / 星盘背面
+
+运行 `pixi run gui`，在等距方位投影或球极投影工作区中选择“背面”标签页。
+外径与外轮廓线宽跟随主图，日期和 EOT 年份跟随星图。背面是平面测量标尺，
+两种投影分别保存设置，不再对背面刻度施加天球投影。
+更新预览同时刷新背面；当前背面页可保存为 SVG、PNG、JPEG。
+工作区配置包含新增命令，旧配置仍可导入。单独导入背面命令时，外径、线宽、年份会更新共享参数。
+
+```powershell
+pixi run draw-astrolabe-back -- --projection stereographic --diameter 120 --boundary-width 0.2 --epoch-year 2026 --angle-band-width 8 --date-band-width 7 --label-size 1.4 --eot-min-radius 0.95 --eot-max-radius 0.05 --calendar-mode concentric --upper-layout hours-sincos --sincos-scale both --shadow-band-width 5 --shadow-label-band-width 3 --output output/back_reference.svg
+```
+
+- 外圈包括四象限 0–90° 测高刻度和十二宫各 0–30° 黄经刻度。
+  `--zodiac-zero` 设置白羊宫零点相对右水平线的逆时针角度，`--rotation-direction` 设置黄经方向；测高仍从水平线起算。
+- `--calendar-mode concentric`：同心圈按公历每日 UT 正午的太阳视黄经定位，日期间隔不均匀。
+- `--calendar-mode eccentric`：全年365或366日等距，拟合圆心与相位。
+  这是偏心圆近似，无法严格复现椭圆轨道；CLI、SVG描述及GUI状态栏报告最大对齐误差。
+  误差指日期刻度**外端点**从中心轴看去的黄经偏差。保留2月29日。
+  年份范围1–3000，早期日期采用回推公历，太阳公式不是高精度星历。
+- `--upper-layout hours`：传统不等时小时弧，将日出至日落分成十二份。
+  以新的非镜像参考图为准，`hours-sincos`：左半保留小时弧并成对标注上午/下午，右半绘制极坐标
+  `r=K sin(θ)`、`r=K cos(θ)`；`--sincos-scale` 可选50、60或 `both`（默认同时显示）。
+  **内圈半径恒对应读数60**。`--sincos-zero-radius` 设置读数0的起始半径占内圆半径的比例（0至小于1，默认0）。
+  读数v对应半径为 `R*(z+(1-z)*v/60)`；50倍曲线最大读数50，两种函数共用此标度。
+  盘面只画函数曲线，不画读数标尺；配套刻度在新增的“标尺”页中输出。
+- 下半影方每边默认12单位，通过 `--shadow-divisions` 调整。高度角α对应水平边读数
+  `N cot(α)`、竖边读数 `N tan(α)`。已知水平距离D，水平边读数q对应高差
+  `H=D*N/q`，竖边读数q对应 `H=D*q/N`；测高时另加观测轴离地高度。
+  刻度带内外边界之间的分格沿中心轴射线绘制，保证在整条刻线上读数一致。
+  `--shadow-band-width` 调刻度带宽，`--shadow-label-band-width` 调独立内侧文字带宽。
+  默认不显示影方数字，与新参考图一致；`--shadow-numbers` 可打开数字。
+- EOT曲线按太阳黄经排列，直接叠加在内部图案上，不占用独立环带，也不画EOT标尺或同心参考圈。
+  `--eot-min-radius` 设置全年最慢时（最小时差）的半径比例，`--eot-max-radius` 设置全年最快时（最大时差）的半径比例。
+  两者均相对于内圆半径，范围0至1；0.5表示内圆半径的一半，会随盘径、日期圈宽度等自动缩放。
+  默认最慢为0.95、最快为0.05，GUI和CLI统一使用与reference一致的方向。
+  其余时差在线性径向标度上插值；两个比例可反向设置，也可设为0。年度极值按该年每日UT正午的时差采样确定。
+  旧配置中的毫米数值及−1自动值需改为0至1的比例；不再作为绝对距离解释。
+  SVG曲线的 `data-eot-*` 属性记录时差极值、比例及换算后的毫米半径，供后续独立标尺使用。
+  EOT定义为真太阳时减平太阳时；`--no-eot` 可隐藏。旧配置的 `--eot-band-width` 仍可读入，但不再使用。
+  圈宽、间距、字号及线宽均可调，单位mm。
+  圈宽挤占内部测量区时会报错，避免裁切。
+
+### 背面文字设置
+
+所有数字和文字均为原生 SVG `<text>`，保留大小写，可在矢量编辑器中修改。
+字体由本机字体选择器提供；换机查看时需安装所选字体，否则查看器会替换字体。
+在背面参数中的“文字设置类别”选择需要调整的一类，再修改其字体、字号和位置。
+角度数字、黄道度数、黄道名称、日期数字、月份名称、小时数字、sin/cos名称、影方数字和影方名称分别独立设置。
+
+CLI 对应前缀为 `angle`、`zodiac-degree`、`zodiac-name`、`day`、`month`、`hour`、`sincos`、`shadow-number`、`shadow-name`。
+以月份为例：
+
+```powershell
+--month-label-font "Times New Roman" --month-label-size 1.8 --month-label-radial-offset 0.5 --month-label-angular-offset 2 --month-label-orientation tangent --month-label-rotation 180
+```
+
+- `*-label-size`：字号mm，0沿用该类默认字号，由公共 `--label-size` 派生。
+- `*-label-radial-offset`：径向移动mm，向外为正。
+- `*-label-angular-offset`：绕圆周移动角度，逆时针为正；只移动文字，不改变刻度。
+- `*-label-orientation`：`auto` 自动保持可读、`tangent` 沿切向、`radial` 沿径向、`horizontal` 水平。
+- `*-label-rotation`：额外旋转角度，顺时针为正；180可翻转文字。
+
+偏心日期圈的日、月标签以日期圈自己的圆心移动，其他标签以盘心移动。文字设置会随工作区配置一同导入和导出。
+
+小时弧参考 [The Astrolabe Project](https://www.astrolabeproject.com/26/02/2012/drafting-the-astrolabe-11-the-unequal-hour-arcs/)，
+影方参考 [Shadow Squares](https://www.astrolabeproject.com/16/01/2012/drafting-the-astrolabe-10-the-shadow-squares/)，
+时差采用 [NOAA/Meeus计算方法](https://gml.noaa.gov/grad/solcalc/calcdetails.html)。
+
+### 配套标尺
+
+两种投影工作区均有“标尺”标签页。点击更新预览，标尺会同步使用对应背面盘的内圆半径、
+sin/cos零值比例、EOT两端比例和星图年份。左臂为0–60刻度（向外读数增大），右臂为EOT分钟刻度。
+EOT刻度按间隔向外取整覆盖全年时差范围，边缘少量外推刻度仍使用同一线性标度。
+整数5的倍数标注数字；数字为可编辑文本，可分别设置两侧的字体、字号和位置。
+
+标尺及背面共用几何与数值换算，**改变尺身长度不会拉伸刻度**。
+全局外圆的直径、轮廓线宽与主图一致，标尺外形的线宽独立设置。
+
+```powershell
+pixi run draw-astrolabe-ruler -- --diameter 120 --angle-band-width 8 --date-band-width 7 --epoch-year 2026 --sincos-zero-radius 0.12 --eot-min-radius 0.95 --eot-max-radius 0.05 --ruler-length-ratio 1 --ruler-symmetry rotational --ruler-arm-width 4 --ruler-hub-radius 5 --output output/ruler_rotational.svg
+```
+
+- `--ruler-length-ratio`：两尖端总长／全局外圆直径，1表示等长，0.8表示80%。
+- `--ruler-symmetry rotational`：中心180°旋转对称，两臂位于长轴的相反侧，与参考图一致。
+- `--ruler-symmetry axial`：关于过圆心、垂直于直径的轴镜像对称，两臂、刻度和数字均位于直径同侧。
+- 两种对称方式的尺臂均以直径为读数边，刻线从尺边向尺身内部延伸。
+- `--ruler-arm-width`：从直径读数边到尺身外缘的宽度，两种模式含义一致。
+- `--ruler-hub-radius`、`--ruler-tip-length`：中心圆台和曲线尖端尺寸。
+- `--ruler-hole-radius`：轴孔半径，默认0不画孔；设置轴孔时，落入孔内的刻度会省略。
+- `--ruler-eot-step`：EOT刻度间隔，0.1至5分钟；`--ruler-tick-length` 和 `--ruler-tick-width` 设置刻线。
+- `--ruler-sin-font/size/label-offset` 与 `--ruler-eot-font/size/label-offset`：两侧数字设置，偏移正值向尺臂内部移动。
+
+缩短标尺后，超出可用直尺身（不含装饰尖端）的刻度会省略，GUI状态栏与CLI报告省略数量。
+EOT两端半径比例相等时无法构成可读标尺，会明确报错。标尺支持SVG、PNG、JPEG保存；
+工作区配置包含 `draw-astrolabe-ruler` 命令，旧配置仍可导入。单独导入标尺命令时也会同步其中的背面和全局参数。

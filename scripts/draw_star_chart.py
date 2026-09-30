@@ -8,6 +8,12 @@ from draw_projection import AZIMUTHAL_EQUIDISTANT, CLOCKWISE, COUNTERCLOCKWISE, 
 from star_chart import POSITIONS, default_data_cache, render_star_chart
 
 HELP = {
+    "milky_way": "Overlay the five Milky Way brightness contours from cached d3-celestial GeoJSON, precessed to the chart year.",
+    "milky_way_width": "Milky Way contour stroke width in millimeters.",
+    "equator": "Overlay the celestial equator on the star chart.",
+    "equator_width": "Equator stroke width in millimeters.",
+    "ecliptic": "Overlay the ecliptic using the same obliquity as the projection charts.",
+    "ecliptic_width": "Ecliptic stroke width in millimeters.",
     "center": "Celestial pole placed at the center of the chart.",
     "range_declination": "Signed declination in degrees at the circular chart boundary.",
     "projection": "Radial projection used for all stars, lines, and labels.",
@@ -42,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rotation", type=float, default=0.0)
     p.add_argument("--rotation-direction", choices=(CLOCKWISE, COUNTERCLOCKWISE), default=COUNTERCLOCKWISE)
     p.add_argument("--epoch-year", type=int, default=date.today().year)
+    p.add_argument("--milky-way", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--milky-way-width", type=float, default=0.1)
+    for curve in ("equator", "ecliptic"):
+        p.add_argument(f"--{curve}", action=argparse.BooleanOptionalAction, default=False)
+        p.add_argument(f"--{curve}-width", type=float, default=0.1)
     p.add_argument("--magnitude-max", type=float, default=5.0)
     p.add_argument("--magnitude-levels", type=int, default=5)
     p.add_argument("--star-diameter-max", type=float, default=0.7)

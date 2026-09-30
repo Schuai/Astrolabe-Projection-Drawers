@@ -9,6 +9,98 @@ from star_chart import adjusted_position, clip_segment_to_circle, default_data_c
 
 
 class StarChartTests(unittest.TestCase):
+    def test_milky_way_overlay_clipping_epoch_and_optional_cache(self):
+        import math
+        import re
+        from xml.etree import ElementTree
+        from star_chart import load_milky_way
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); self.fixture(root)
+            base = ["--data-cache", directory, "--no-constellation-lines", "--epoch-year", "2000"]
+            parser = build_parser()
+            self.assertNotIn(b"star-chart-milky-way", render_star_chart(parser.parse_args(base))[0])
+            with self.assertRaisesRegex(FileNotFoundError, "Milky Way data is missing"):
+                render_star_chart(parser.parse_args(base + ["--milky-way"]))
+            path = root / "milkyway" / "mw.json"; path.parent.mkdir()
+            # A closed ring crossing RA wrap and the northern chart boundary.
+            ring = [[179, 60], [-179, 60], [-179, -60], [179, -60], [179, 60]]
+            path.write_text(json.dumps({"type": "FeatureCollection", "features": [
+                {"geometry": {"type": "MultiPolygon", "coordinates": [[ring]]}}]}), encoding="utf-8")
+            self.assertEqual(len(load_milky_way(path)), 1)
+            for projection in ("azimuthal-equidistant", "stereographic"):
+                for pole, limit in (("north", "-30"), ("south", "30")):
+                    args = parser.parse_args(base + ["--milky-way", "--milky-way-width", "0.24",
+                        "--projection", projection, "--center", pole, "--range-declination", limit])
+                    svg, _ = render_star_chart(args)
+                    overlay = ElementTree.fromstring(svg).find(".//*[@id='star-chart-milky-way']")
+                    self.assertEqual(overlay.get("fill"), "none")
+                    self.assertEqual(overlay.get("stroke-width"), "0.2400")
+                    self.assertGreater(len(overlay), 0)
+                    for item in overlay:
+                        values = list(map(float, re.findall(r"-?\d+(?:\.\d+)?", item.get("d"))))
+                        for x, y in zip(values[::2], values[1::2]): self.assertLessEqual(math.hypot(x - 66, y - 66), 60.001)
+                    args.epoch_year = 2050
+                    self.assertNotEqual(svg, render_star_chart(args)[0])
+            path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Invalid Milky Way"):
+                load_milky_way(path)
+
+    def test_milky_way_download_preserves_cache_and_records_hashes(self):
+        from unittest.mock import patch
+        from star_chart import download_milky_way_data
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            preserved = root / "existing.txt"; preserved.write_text("keep", encoding="utf-8")
+            old_hash = hashlib.sha256(preserved.read_bytes()).hexdigest()
+            (root / "manifest.json").write_text(json.dumps({"files": {"existing.txt": old_hash}}), encoding="utf-8")
+            def fake_download(url, target):
+                content = json.dumps({"type": "FeatureCollection", "features": [{"geometry": {
+                    "type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}}]}) if url.endswith("mw.json") else "source and license"
+                target.write_text(content, encoding="utf-8")
+                return hashlib.sha256(target.read_bytes()).hexdigest()
+            with patch("star_chart._download", side_effect=fake_download):
+                manifest = download_milky_way_data(root)
+            self.assertEqual(manifest["files"]["existing.txt"], old_hash)
+            self.assertIn("milkyway/LICENSE", manifest["files"])
+            self.assertEqual(validate_star_cache(root), [])
+
+    def test_optional_reference_curves_follow_projection_and_rotation(self):
+        import math
+        import re
+        from xml.etree import ElementTree
+        with tempfile.TemporaryDirectory() as directory:
+            self.fixture(Path(directory))
+            parser = build_parser()
+            base = ["--data-cache", directory, "--no-constellation-lines"]
+            svg, _ = render_star_chart(parser.parse_args(base))
+            self.assertNotIn(b"star-chart-equator", svg)
+            self.assertNotIn(b"star-chart-ecliptic", svg)
+            for projection in ("azimuthal-equidistant", "stereographic"):
+                for pole, boundary in (("north", "-30"), ("south", "30")):
+                    args = parser.parse_args(base + ["--projection", projection, "--center", pole,
+                        "--range-declination", boundary, "--rotation", "37", "--rotation-direction", "clockwise",
+                        "--equator", "--ecliptic", "--equator-width", "0.23", "--ecliptic-width", "0.31"])
+                    svg, _ = render_star_chart(args)
+                    document = ElementTree.fromstring(svg)
+                    scale = 60 / 120 if projection == "azimuthal-equidistant" else 60 / math.tan(math.radians(60))
+                    for curve, width in (("equator", "0.2300"), ("ecliptic", "0.3100")):
+                        path = document.find(f".//*[@id='star-chart-{curve}']")
+                        self.assertIsNotNone(path)
+                        self.assertEqual(path.get("stroke-width"), width)
+                        values = [float(value) for value in re.findall(r"-?\d+(?:\.\d+)?", path.get("d"))]
+                        expected = projected_xy(0, 0, args, scale, 66)
+                        for actual, target in zip(values[:2], expected): self.assertAlmostEqual(actual, target, places=3)
+                        self.assertTrue(path.get("d").endswith("Z"))
+                    group = document.find("{http://www.w3.org/2000/svg}g")
+                    self.assertEqual(group.get("clip-path"), "url(#chart-clip)")
+            svg, _ = render_star_chart(parser.parse_args(base + ["--equator", "--no-ecliptic"]))
+            self.assertIn(b"star-chart-equator", svg)
+            self.assertNotIn(b"star-chart-ecliptic", svg)
+            for curve in ("equator", "ecliptic"):
+                with self.assertRaisesRegex(ValueError, curve + "-width"):
+                    render_star_chart(parser.parse_args(base + [f"--{curve}-width", "-1"]))
+
     def test_requested_star_chart_defaults(self):
         args=build_parser().parse_args([])
         self.assertEqual((args.magnitude_max,args.magnitude_levels,args.star_diameter_max,args.star_diameter_min),(5.0,5,0.7,0.2))

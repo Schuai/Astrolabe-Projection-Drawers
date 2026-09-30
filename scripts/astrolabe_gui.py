@@ -26,6 +26,8 @@ from draw_projection import (
 )
 from perspective_corrector import rectify_mode_b
 from draw_star_chart import build_parser as build_star_parser
+from draw_astrolabe_back import build_parser as build_back_parser, render_back, LABEL_GROUPS, validate as validate_back
+from draw_astrolabe_ruler import build_parser as build_ruler_parser, render_ruler, validate_ruler
 from star_chart import available_cultures, default_data_cache, download_star_data, render_star_chart, validate_star_cache
 
 
@@ -122,6 +124,9 @@ UI["zh"].update({
 })
 
 STAR_ARG_ZH = {
+    "milky_way": "叠加银河轮廓线", "milky_way_width": "银河轮廓线宽",
+    "equator": "叠加赤道", "equator_width": "赤道线宽",
+    "ecliptic": "叠加黄道", "ecliptic_width": "黄道线宽",
     "center": "中心极点", "range_declination": "边界赤纬", "projection": "投影方法",
     "diameter": "星图直径", "boundary_width": "轮廓线宽", "rotation": "旋转角度", "rotation_direction": "旋转方向",
     "epoch_year": "目标年份", "magnitude_max": "视星等上限",
@@ -141,6 +146,12 @@ STAR_ARG_ZH = {
 }
 
 STAR_HELP_ZH = {
+    "milky_way": "叠加本地 d3-celestial 数据中的五级银河亮度轮廓，按星图年份进行岁差转换。缺少数据时请在设置 → 天文数据中更新。",
+    "milky_way_width": "银河轮廓线宽，单位为毫米。",
+    "equator": "在星图上叠加天球赤道，随当前投影、旋转和赤纬范围绘制。",
+    "equator_width": "赤道线宽，单位为毫米。",
+    "ecliptic": "在星图上叠加黄道，沿用投影图的黄赤交角，并随当前投影、旋转和赤纬范围绘制。",
+    "ecliptic_width": "黄道线宽，单位为毫米。",
     "center": "选择星图中心为北天极或南天极。", "range_declination": "圆形边界处的赤纬，单位为度；北纬为正，南纬为负。",
     "projection": "选择等距方位投影或球极投影。", "diameter": "圆形星图边界直径，单位为毫米。",
     "boundary_width": "星图外轮廓线宽，单位为毫米。", "rotation": "整体旋转星图，单位为度。",
@@ -410,6 +421,8 @@ def localized_error(error: object, language: str) -> str:
     if language != "zh": return message
     if message in ERROR_ZH: return ERROR_ZH[message]
     if message.startswith("Star data is missing:"): return "缺少恒星数据，请在“设置 → 天文数据”中下载。"
+    if message.startswith("Milky Way data is missing:"): return "缺少银河轮廓数据，请在“设置 → 天文数据”中更新，或运行 pixi run download-star-data --milky-way-only。"
+    if message == "Invalid Milky Way GeoJSON data": return "银河轮廓数据格式无效，请重新下载。"
     if message.startswith("Sky culture is missing:"): return "缺少所选星空文化数据，请在“设置 → 天文数据”中下载或更新。"
     if message.startswith("Missing cached file:"): return "缓存文件缺失：" + message.split(":", 1)[1].strip()
     if message.startswith("Cached file hash mismatch:"): return "缓存文件哈希不匹配：" + message.split(":", 1)[1].strip()
@@ -512,7 +525,7 @@ def tokenize_config(text: str) -> list[str]:
     ]
     if runnable:
         text = runnable[0]
-    task_match = re.search(r"pixi\s+run\s+(draw-(?:azimuthal-equidistant|stereographic|star-chart))", text)
+    task_match = re.search(r"pixi\s+run\s+(draw-(?:azimuthal-equidistant|stereographic|star-chart|astrolabe-back|astrolabe-ruler))", text)
     task = task_match.group(1) if task_match else ""
     tokens = re.findall(r'"([^"\r\n]*)"|\'([^\'\r\n]*)\'|(--?[A-Za-z][\w-]*|[-+]?\d+(?:\.\d+)?(?:,[-+]?\d+(?:\.\d+)?)*|[A-Za-z][\w.-]*)', text)
     flat = [next(part for part in match if part) for match in tokens]
@@ -523,7 +536,7 @@ def tokenize_config(text: str) -> list[str]:
 def tokenize_workspace_config(text: str) -> list[list[str]]:
     """Parse both commands emitted by a whole projection-workspace export."""
     if "# Astrolabe workspace:" not in text: return []
-    starts = list(re.finditer(r"(?im)^\s*pixi\s+run\s+draw-(?:azimuthal-equidistant|stereographic|star-chart)\b", text))
+    starts = list(re.finditer(r"(?im)^\s*pixi\s+run\s+draw-(?:azimuthal-equidistant|stereographic|star-chart|astrolabe-back|astrolabe-ruler)\b", text))
     commands = []
     for index, match in enumerate(starts):
         end = starts[index + 1].start() if index + 1 < len(starts) else len(text)
@@ -980,6 +993,8 @@ class StarChartTab(QWidget):
         stars = self.value("show_star_names")
         figures = self.value("show_constellation_names")
         dependencies = {
+            "milky_way_width": self.value("milky_way"),
+            "equator_width": self.value("equator"), "ecliptic_width": self.value("ecliptic"),
             "sky_culture": lines or stars or figures, "constellation_width": lines,
             "star_name_language": stars, "star_name_font": stars, "star_name_size": stars,
             "star_name_position": stars, "star_name_radial_offset": stars, "star_name_tangential_offset": stars,
@@ -1081,6 +1096,168 @@ class StarChartTab(QWidget):
         super().resizeEvent(event); self.apply_responsive_layout(event.size().width())
 
 
+BACK_LABELS = {
+    'calendar_mode': '日期圈模式', 'rotation_direction': '黄经递增方向',
+    'zodiac_zero': '白羊宫零点角度', 'angle_band_width': '角度及黄道圈宽度（mm）',
+    'date_band_width': '日期圈宽度（mm）', 'ring_gap': '圈间距（mm）',
+    'line_width': '主刻度线宽（mm）', 'minor_width': '次刻度线宽（mm）',
+    'label_size': '刻度字号（mm）', 'upper_layout': '上半盘布局',
+    'sincos_scale': 'sin/cos 倍数（内半径恒为60单位）', 'shadow_divisions': '影方每边单位数',
+    'sincos_zero_radius': 'sin/cos 零值半径／内圆半径',
+    'shadow_band_width': '影方刻度带宽（mm）', 'eot': '显示时差曲线 EOT',
+    'shadow_label_band_width': '影方文字带宽（mm）', 'shadow_numbers': '显示影方数字',
+    'eot_min_radius': 'EOT 最慢时半径／内圆半径', 'eot_max_radius': 'EOT 最快时半径／内圆半径',
+    'eot_width': 'EOT 曲线线宽（mm）',
+}
+BACK_LABEL_GROUPS = {'angle':'角度数字', 'zodiac_degree':'黄道度数', 'zodiac_name':'黄道名称',
+                     'day':'日期数字', 'month':'月份名称', 'hour':'小时数字',
+                     'sincos':'sin/cos 名称', 'shadow_number':'影方数字', 'shadow_name':'影方名称'}
+for _category, _title in BACK_LABEL_GROUPS.items():
+    for _suffix, _label in {'font':'字体', 'size':'字号（mm，0=默认）', 'radial_offset':'径向偏移（mm，外正内负）',
+                           'angular_offset':'圆周偏移（°，逆时针为正）', 'orientation':'文字朝向',
+                           'rotation':'文字附加旋转（°）'}.items():
+        BACK_LABELS[f'{_category}_label_{_suffix}'] = f'{_title}：{_label}'
+BACK_CHOICES = {'concentric': '同心（按太阳黄经）', 'eccentric': '偏心（日期等距，近似拟合）',
+                'hours': '完整白天12小时', 'hours-sincos': '半侧小时 + sin/cos',
+                'clockwise': '顺时针', 'counterclockwise': '逆时针', 'both':'50和60同时显示',
+                'auto':'自动保持可读', 'tangent':'沿圆周切向', 'radial':'沿径向', 'horizontal':'水平'}
+UI['en'].update(back='Back', back_updated='Back updated; calendar maximum error: {error:.4f}°.', back_failed='Back preview failed: {value}')
+UI['zh'].update(back='背面', back_updated='背面已更新；日期最大对齐误差：{error:.4f}°。', back_failed='背面预览失败：{value}')
+
+
+class BackControls(QWidget):
+    """Parser-backed controls; shared values are injected by the workspace."""
+    _make_widget = StarChartTab._make_widget
+    value = StarChartTab.value
+    set_value = StarChartTab.set_value
+
+    def __init__(self, language):
+        super().__init__(); self.language = language; self.parser = build_back_parser()
+        self.rows = {}; self.widgets = {}; self.actions = {}; self.main_svg = None
+        self.form = QFormLayout(self); self.preview = QSvgWidget()
+        self.label_category = NoWheelComboBox()
+        for category in LABEL_GROUPS:self.label_category.addItem(category,category)
+        self.rows['label_category']=(QLabel(),self.label_category)
+        self.form.addRow(*self.rows['label_category'])
+        for action in self.parser._actions:
+            if action.dest in ('help', 'output', 'projection', 'diameter', 'boundary_width', 'epoch_year', 'eot_band_width'): continue
+            label = QLabel(); widget = self._make_widget(action)
+            if isinstance(widget,QFontComboBox):widget.setCurrentFont(QFont(action.default))
+            self.actions[action.dest] = action; self.widgets[action.dest] = widget
+            self.rows[action.dest] = (label, widget); self.form.addRow(label, widget)
+        self.widgets['shadow_divisions'].setRange(1, 100)
+        for name in ('eot_min_radius', 'eot_max_radius'):
+            self.widgets[name].setRange(0, 1)
+            self.widgets[name].setSingleStep(0.05)
+        self.widgets['sincos_zero_radius'].setRange(0,.9999)
+        self.widgets['sincos_zero_radius'].setSingleStep(.05)
+        self.widgets['eot'].toggled.connect(self.refresh_visibility)
+        self.widgets['upper_layout'].currentIndexChanged.connect(self.refresh_visibility)
+        self.label_category.currentIndexChanged.connect(self.refresh_visibility)
+        self.widgets['shadow_numbers'].toggled.connect(self.refresh_visibility)
+        self.retranslate(); self.refresh_visibility()
+
+    def refresh_visibility(self, *_):
+        for name,row in self.rows.items():
+            for category in LABEL_GROUPS:
+                if name.startswith(category+'_label_'):
+                    for widget in row:widget.setVisible(self.label_category.currentData()==category)
+        for name, visible in {'eot_min_radius':self.value('eot'), 'eot_max_radius':self.value('eot'), 'eot_width':self.value('eot'),
+                              'sincos_scale':self.value('upper_layout') == 'hours-sincos',
+                              'sincos_zero_radius':self.value('upper_layout') == 'hours-sincos'}.items():
+            for widget in self.rows[name]: widget.setVisible(visible)
+
+    def retranslate(self):
+        self.rows['label_category'][0].setText('文字设置类别' if self.language()=='zh' else 'Text settings category')
+        for i,category in enumerate(LABEL_GROUPS):
+            self.label_category.setItemText(i,BACK_LABEL_GROUPS[category] if self.language()=='zh' else category.replace('_',' ').title())
+        for name, action in self.actions.items():
+            label, widget = self.rows[name]
+            label.setText(BACK_LABELS[name] if self.language() == 'zh' else action.option_strings[0])
+            label.setToolTip(action.help or ''); widget.setToolTip(action.help or '')
+            if name in ('eot_min_radius', 'eot_max_radius'):
+                tip = ('最慢（全年最小时差）对应内圆半径的比例，默认0.95。0.5表示内圆半径的一半。' if name == 'eot_min_radius' else '最快（全年最大时差）对应内圆半径的比例，默认0.05，与参考图方向一致。0.5表示内圆半径的一半。') if self.language() == 'zh' else action.help
+                label.setToolTip(tip); widget.setToolTip(tip)
+            if isinstance(widget, QComboBox) and not isinstance(widget, QFontComboBox):
+                for i in range(widget.count()):
+                    value = str(widget.itemData(i))
+                    widget.setItemText(i, BACK_CHOICES.get(value, value) if self.language() == 'zh' else value)
+
+    def namespace(self):
+        args = self.parser.parse_args([])
+        for name in self.widgets: setattr(args, name, self.value(name))
+        return args
+
+    def import_args(self, argv):
+        args = self.parser.parse_args(argv)
+        validate_back(args)
+        for name in self.widgets: self.set_value(name, getattr(args, name))
+        self.refresh_visibility()
+
+    def export_args(self, args):
+        result = []
+        for action in self.parser._actions:
+            if action.dest in ('help', 'output', 'eot_band_width'): continue
+            value = getattr(args, action.dest)
+            if isinstance(action, argparse.BooleanOptionalAction):
+                result.append(action.option_strings[0 if value else 1])
+            else: result.extend((action.option_strings[0], str(value)))
+        return result
+
+
+RULER_LABELS = {
+    'ruler_symmetry':'标尺对称方式', 'ruler_length_ratio':'标尺长度／全局外圆直径',
+    'ruler_arm_width':'尺臂读数侧宽度（mm）', 'ruler_hub_radius':'中心圆台半径（mm）',
+    'ruler_hole_radius':'轴孔半径（mm，0隐藏）', 'ruler_tip_length':'曲线尖端长度（mm）',
+    'ruler_outline_width':'标尺外形线宽（mm）', 'ruler_tick_width':'刻度线宽（mm）',
+    'ruler_tick_length':'主刻度长度（mm）', 'ruler_eot_step':'EOT 刻度间隔（分钟）',
+    'ruler_sin_font':'0–60 数字字体', 'ruler_sin_size':'0–60 数字字号（mm）',
+    'ruler_sin_label_offset':'0–60 数字离读数边偏移（mm）',
+    'ruler_eot_font':'EOT 数字字体', 'ruler_eot_size':'EOT 数字字号（mm）',
+    'ruler_eot_label_offset':'EOT 数字离读数边偏移（mm）',
+}
+UI['en'].update(ruler='Ruler',ruler_updated='Ruler updated; omitted ticks outside usable arm / in pivot hole: {count}.',ruler_failed='Ruler preview failed: {value}')
+UI['zh'].update(ruler='标尺',ruler_updated='标尺已更新；超出可用尺身／落入轴孔而省略的刻度：{count}。',ruler_failed='标尺预览失败：{value}')
+
+
+class RulerControls(QWidget):
+    _make_widget=StarChartTab._make_widget
+    value=StarChartTab.value
+    set_value=StarChartTab.set_value
+    export_args=BackControls.export_args
+
+    def __init__(self,language):
+        super().__init__();self.language=language;self.parser=build_ruler_parser()
+        self.rows={};self.widgets={};self.actions={};self.main_svg=None
+        self.form=QFormLayout(self);self.preview=QSvgWidget()
+        for action in self.parser._actions:
+            if not action.dest.startswith('ruler_'):continue
+            widget=self._make_widget(action);label=QLabel()
+            if isinstance(widget,QFontComboBox):widget.setCurrentFont(QFont(action.default))
+            self.widgets[action.dest]=widget;self.rows[action.dest]=(label,widget);self.actions[action.dest]=action
+            self.form.addRow(label,widget)
+        self.retranslate()
+
+    def namespace(self,back):
+        args=self.parser.parse_args([])
+        for name,value in vars(back).items():setattr(args,name,value)
+        for name in self.widgets:setattr(args,name,self.value(name))
+        return args
+
+    def import_args(self,argv):
+        args=self.parser.parse_args(argv);validate_ruler(args)
+        for name in self.widgets:self.set_value(name,getattr(args,name))
+
+    def retranslate(self):
+        for name,action in self.actions.items():
+            label,widget=self.rows[name];label.setText(RULER_LABELS[name] if self.language()=='zh' else action.option_strings[0])
+            label.setToolTip(action.help);widget.setToolTip(action.help)
+            if name=='ruler_symmetry':
+                for i in range(widget.count()):
+                    value=widget.itemData(i)
+                    widget.setItemText(i,({'rotational':'旋转对称（两臂错侧）','axial':'轴对称（刻度在直径同侧）'}[value] if self.language()=='zh' else value))
+
+
 class ProjectionWorkspace(QWidget):
     """Shared configuration with Main, Ecliptic, and Star Chart preview pages."""
     STAR_SHARED_PARAMETERS = {
@@ -1094,6 +1271,8 @@ class ProjectionWorkspace(QWidget):
         super().__init__(); self.task = task; self.projection = projection; self.language = language; self.dpi = dpi
         self.projection_controls = ProjectionTab(task, projection, language, dpi)
         self.star_chart = StarChartTab(language, dpi, cache=cache, fixed_projection=projection)
+        self.back = BackControls(language)
+        self.ruler = RulerControls(language)
         self.projection_controls.set_value("ecliptic", True)
         self.projection_controls.rows["ecliptic"][1].setProperty("workspaceHidden", True)
         self.projection_controls.rows["ecliptic"][0].setVisible(False); self.projection_controls.rows["ecliptic"][1].setVisible(False)
@@ -1104,8 +1283,16 @@ class ProjectionWorkspace(QWidget):
         self.main_section, main_form = self._section()
         self.ecliptic_section, ecliptic_form = self._section()
         self.star_section, star_form = self._section()
-        self.section_forms.extend((main_form, ecliptic_form, star_form))
-        self.sections.extend((self.main_section, self.ecliptic_section, self.star_section))
+        self.back_section, back_form = self._section()
+        self.ruler_section, ruler_form = self._section()
+        self.section_forms.extend((main_form, ecliptic_form, star_form, back_form, ruler_form))
+        self.sections.extend((self.main_section, self.ecliptic_section, self.star_section, self.back_section, self.ruler_section))
+        self.ruler_shared_note=QLabel();self.ruler_shared_note.setWordWrap(True);ruler_form.addRow(self.ruler_shared_note)
+        for label,widget in self.ruler.rows.values():
+            self.ruler.form.takeRow(label);ruler_form.addRow(label,widget)
+        self.back_shared_note = QLabel(); self.back_shared_note.setWordWrap(True); back_form.addRow(self.back_shared_note)
+        for label, widget in self.back.rows.values():
+            self.back.form.takeRow(label); back_form.addRow(label, widget)
 
         for name, (label, widget) in self.projection_controls.rows.items():
             self.projection_controls.form.takeRow(label)
@@ -1129,7 +1316,7 @@ class ProjectionWorkspace(QWidget):
         self.left_panel = left
 
         self.pages = QTabWidget(); self.page_widgets = []
-        preview_views = (self.projection_controls.main_view, self.projection_controls.ecliptic_view, self.star_chart.preview)
+        preview_views = (self.projection_controls.main_view, self.projection_controls.ecliptic_view, self.star_chart.preview, self.back.preview, self.ruler.preview)
         # Main and Ecliptic were created as pages of ProjectionTab's legacy
         # preview QTabWidget.  Merely adding them to another layout reparents
         # them, but does not clear the explicit hidden state maintained by the
@@ -1171,6 +1358,8 @@ class ProjectionWorkspace(QWidget):
     def main_svg(self):
         if self.current_index() == 0: return self.projection_controls.main_svg
         if self.current_index() == 1: return self.projection_controls.ecliptic_svg
+        if self.current_index() == 3: return self.back.main_svg
+        if self.current_index() == 4: return self.ruler.main_svg
         return self.star_chart.main_svg
 
     def _sync_shared_star_parameters(self):
@@ -1186,6 +1375,26 @@ class ProjectionWorkspace(QWidget):
     def star_namespace(self):
         self._sync_shared_star_parameters()
         return self.star_chart.namespace()
+
+    def back_namespace(self):
+        args = self.back.namespace()
+        args.projection = self.projection
+        args.diameter = self.projection_controls.value('diameter')
+        args.boundary_width = self.projection_controls.value('boundary_width')
+        args.epoch_year = self.star_chart.value('epoch_year')
+        return args
+
+    def import_back(self, argv):
+        args = build_back_parser().parse_args(argv)
+        if args.projection != self.projection: raise ValueError('Back projection does not match workspace.')
+        self.back.import_args(argv)
+
+    def ruler_namespace(self):return self.ruler.namespace(self.back_namespace())
+
+    def import_ruler(self,argv):
+        args=build_ruler_parser().parse_args(argv)
+        if args.projection!=self.projection:raise ValueError('Ruler projection does not match workspace.')
+        self.ruler.import_args(argv)
 
     def update_preview(self):
         # One click refreshes the entire current projection workspace. Each
@@ -1211,6 +1420,19 @@ class ProjectionWorkspace(QWidget):
             messages.append(UI[self.language()]["star_summary"].format(stars=stats.stars, segments=stats.segments,
                 labels=stats.star_labels + stats.figure_labels, hidden=stats.hidden_labels,
                 missing=stats.missing_identifiers, degraded=stats.degraded_motion))
+        try: back_svg, error = render_back(self.back_namespace())
+        except Exception as exc:
+            messages.append(UI[self.language()]['back_failed'].format(value=str(exc)))
+        else:
+            self.back.main_svg = back_svg; self.back.preview.load(QByteArray(back_svg))
+            self.back.preview.renderer().setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+            messages.append(UI[self.language()]['back_updated'].format(error=error))
+        try:ruler_svg,skipped=render_ruler(self.ruler_namespace())
+        except Exception as exc:messages.append(UI[self.language()]['ruler_failed'].format(value=str(exc)))
+        else:
+            self.ruler.main_svg=ruler_svg;self.ruler.preview.load(QByteArray(ruler_svg))
+            self.ruler.preview.renderer().setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+            messages.append(UI[self.language()]['ruler_updated'].format(count=skipped))
         self.status.setText(" ".join(messages))
 
     def save(self, path: Path):
@@ -1228,7 +1450,9 @@ class ProjectionWorkspace(QWidget):
         projection_args = self.projection_controls.export_args()
         if "--ecliptic" not in projection_args: projection_args.append("--ecliptic")
         return (f"# Astrolabe workspace: {self.projection}\n" + powershell_config(self.task, projection_args) + "\n" +
-                powershell_config("draw-star-chart", self.star_chart.export_args()))
+                powershell_config("draw-star-chart", self.star_chart.export_args()) + '\n' +
+                powershell_config('draw-astrolabe-back', self.back.export_args(self.back_namespace())) + '\n' +
+                powershell_config('draw-astrolabe-ruler', self.ruler.export_args(self.ruler_namespace())))
 
     def import_projection(self, argv: list[str]):
         self.projection_controls.import_args(argv); self.projection_controls.set_value("ecliptic", True)
@@ -1240,7 +1464,11 @@ class ProjectionWorkspace(QWidget):
 
     def retranslate(self):
         self.main_section.setTitle(UI[self.language()]["main"]); self.ecliptic_section.setTitle(UI[self.language()]["ecliptic"]); self.star_section.setTitle(UI[self.language()]["star_chart"])
-        for index, key in enumerate(("main", "ecliptic", "star_chart")): self.pages.setTabText(index, UI[self.language()][key])
+        self.back_section.setTitle(UI[self.language()]['back']); self.back.retranslate()
+        self.ruler_section.setTitle(UI[self.language()]['ruler']);self.ruler.retranslate()
+        self.ruler_shared_note.setText('外圆直径与线宽跟随主图；刻度跟随背面内圆、sin/cos 零值与 EOT 参数、星图年份。标尺水平绘制，左侧0–60，右侧EOT（分钟）。长度只改变外形，不缩放刻度。' if self.language()=='zh' else 'Global outline follows Main; scales follow the back inner circle, sin/cos zero and EOT ratios, and star-chart year. Horizontal ruler: 0–60 on the left, EOT minutes on the right. Length changes the outline, not scale calibration.')
+        self.back_shared_note.setText('外径及外轮廓线宽跟随主图；年份跟随星图。日期取公历每日 UT 正午。偏心等距圈为近似拟合。EOT = 真太阳时 − 平太阳时，单位分钟。内圈半径恒为60标尺单位。' if self.language() == 'zh' else 'Diameter and outline follow Main; year follows Star Chart. Gregorian dates at noon UT. Eccentric calendar is an equal-spacing approximation. EOT = apparent − mean solar time (minutes). Inner radius always equals 60 ruler units.')
+        for index, key in enumerate(("main", "ecliptic", "star_chart", "back", "ruler")): self.pages.setTabText(index, UI[self.language()][key])
         self.update_button.setText(UI[self.language()]["update"])
         self.projection_controls.retranslate(); self.star_chart.retranslate()
         if not self.main_svg: self.status.setText(UI[self.language()]["ready"])
@@ -1249,7 +1477,7 @@ class ProjectionWorkspace(QWidget):
     def apply_responsive_layout(self, width: int):
         if width <= 0: return
         compact = width < 1100
-        all_rows = tuple(self.projection_controls.rows.values()) + tuple(self.star_chart.rows.values())
+        all_rows = tuple(self.projection_controls.rows.values()) + tuple(self.star_chart.rows.values()) + tuple(self.back.rows.values()) + tuple(self.ruler.rows.values())
         widest = max((label.sizeHint().width() for label, _widget in all_rows), default=260)
         if compact: left_width = max(320, min(560, int(width * 0.52)))
         else: left_width = min(max(widest + 300, 440), 800)
@@ -1264,7 +1492,7 @@ class ProjectionWorkspace(QWidget):
             wrapped_height = label.heightForWidth(label_width) if compact else label.fontMetrics().height()
             label.setMinimumHeight(max(label.fontMetrics().height(), wrapped_height)); label.updateGeometry()
         self.left_panel.setMinimumWidth(left_width); preview = 220 if compact else 420
-        for view in (self.projection_controls.main_view, self.projection_controls.ecliptic_view, self.star_chart.preview): view.setMinimumSize(preview, preview)
+        for view in (self.projection_controls.main_view, self.projection_controls.ecliptic_view, self.star_chart.preview, self.back.preview, self.ruler.preview): view.setMinimumSize(preview, preview)
         self.splitter.setSizes([left_width, max(preview, width - left_width)])
 
     def refresh_cultures(self): self.star_chart.refresh_cultures()
@@ -1409,6 +1637,8 @@ class AstronomyDataDialog(QDialog):
         text = [f"HYG {manifest.get('hyg', {}).get('version', '4.1')}: {manifest.get('hyg', {}).get('license', 'CC BY-SA 4.0')}",
                 f"Stellarium {manifest.get('stellarium', {}).get('version', '26.1')}: {manifest.get('stellarium', {}).get('license', 'GPL-2.0 project')}"]
         if culture_licenses: text.extend(["", "Sky-culture license files:", *culture_licenses])
+        if "milky_way" in manifest:
+            text.extend(["", "Milky Way: " + manifest["milky_way"]["license"], manifest["milky_way"]["source"]])
         QMessageBox.information(self, UI[self.language]["licenses_title"], "\n".join(text))
 
 
@@ -1499,12 +1729,32 @@ class MainWindow(QMainWindow):
                 star_args=build_star_parser().parse_args(star_commands[0][1:])
                 if star_args.projection!=workspace.projection:raise ValueError("Star-chart projection does not match the workspace projection.")
                 workspace.import_projection(projection_command[1:]);workspace.import_star(star_commands[0][1:])
+                back_commands=[command for command in commands if command[0]=="draw-astrolabe-back"]
+                if len(back_commands)>1: raise ValueError("Workspace contains multiple back commands.")
+                if back_commands: workspace.import_back(back_commands[0][1:])
+                ruler_commands=[command for command in commands if command[0]=="draw-astrolabe-ruler"]
+                if len(ruler_commands)>1:raise ValueError("Workspace contains multiple ruler commands.")
+                if ruler_commands:workspace.import_ruler(ruler_commands[0][1:])
                 workspace.status.setText(self.tr("imported"));self.tabs.setCurrentWidget(workspace);return
-            tokens=tokenize_config(text);task=tokens[0] if tokens and tokens[0] in (*TASKS,"draw-star-chart") else None;argv=tokens[1:] if task else tokens
+            tokens=tokenize_config(text);task=tokens[0] if tokens and tokens[0] in (*TASKS,"draw-star-chart","draw-astrolabe-back","draw-astrolabe-ruler") else None;argv=tokens[1:] if task else tokens
             if not task:
                 current=self.current();task=getattr(current,"task",None) if hasattr(current,"import_args") else None
             if not task:raise ValueError(self.tr("task_missing"))
-            if task=="draw-star-chart":
+            if task=="draw-astrolabe-ruler":
+                parsed=build_ruler_parser().parse_args(argv);workspace=next(item for item in self.projection_tabs.values() if item.projection==parsed.projection)
+                validate_back(parsed);validate_ruler(parsed)
+                workspace.projection_controls.set_value("diameter",parsed.diameter)
+                workspace.projection_controls.set_value("boundary_width",parsed.boundary_width)
+                workspace.star_chart.set_value("epoch_year",parsed.epoch_year)
+                for name in workspace.back.widgets:workspace.back.set_value(name,getattr(parsed,name))
+                workspace.back.refresh_visibility();workspace.import_ruler(argv);workspace.select_index(4)
+            elif task=="draw-astrolabe-back":
+                parsed=build_back_parser().parse_args(argv);workspace=next(item for item in self.projection_tabs.values() if item.projection==parsed.projection)
+                workspace.projection_controls.set_value("diameter",parsed.diameter)
+                workspace.projection_controls.set_value("boundary_width",parsed.boundary_width)
+                workspace.star_chart.set_value("epoch_year",parsed.epoch_year)
+                workspace.import_back(argv);workspace.select_index(3)
+            elif task=="draw-star-chart":
                 parsed=build_star_parser().parse_args(argv);workspace=next(item for item in self.projection_tabs.values() if item.projection==parsed.projection)
                 workspace.import_star(argv);workspace.select_index(2)
             else:

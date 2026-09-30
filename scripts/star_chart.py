@@ -23,7 +23,7 @@ from astropy.coordinates import FK5, SkyCoord
 from astropy.time import Time
 import astropy.units as u
 
-from draw_projection import AZIMUTHAL_EQUIDISTANT, STEREOGRAPHIC, project_point
+from draw_projection import AZIMUTHAL_EQUIDISTANT, STEREOGRAPHIC, ecliptic_to_equatorial, points_to_path, project_point
 
 HYG_VERSION = "4.1"
 STELLARIUM_VERSION = "26.1"
@@ -36,6 +36,55 @@ STELLARIUM_URL = "https://github.com/Stellarium/stellarium/archive/refs/tags/v26
 SVG_NS = "http://www.w3.org/2000/svg"
 POSITIONS = ("north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest")
 MAGNITUDE_LEVEL_FLOOR = -1.5
+MILKY_WAY_VERSION = "7e720a3de062059d4c5400a379146a601d9010e0"
+MILKY_WAY_BASE_URL = f"https://raw.githubusercontent.com/ofrohn/d3-celestial/{MILKY_WAY_VERSION}"
+MILKY_WAY_FILES = {"mw.json": "data/mw.json", "LICENSE": "LICENSE", "SOURCE.md": "readme.md"}
+
+
+def load_milky_way(path: Path) -> list[list[tuple[float, float]]]:
+    """Read J2000 equatorial GeoJSON rings, including holes and separate islands."""
+    if not path.exists():
+        raise FileNotFoundError(f"Milky Way data is missing: {path}. Run download-star-data --milky-way-only.")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    rings = []
+    try:
+        if raw["type"] != "FeatureCollection": raise ValueError()
+        for feature in raw["features"]:
+            geometry = feature["geometry"]
+            if geometry["type"] == "Polygon": polygons = [geometry["coordinates"]]
+            elif geometry["type"] == "MultiPolygon": polygons = geometry["coordinates"]
+            else: raise ValueError()
+            for polygon in polygons:
+                for ring in polygon:
+                    points = [(float(point[0]), float(point[1])) for point in ring]
+                    if len(points) < 4 or points[0] != points[-1]: raise ValueError()
+                    if any(not math.isfinite(ra) or not math.isfinite(dec) or not -180 <= ra <= 180 or not -90 <= dec <= 90 for ra, dec in points): raise ValueError()
+                    rings.append(points)
+        if not rings: raise ValueError()
+    except (KeyError, TypeError, IndexError, ValueError) as exc:
+        raise ValueError("Invalid Milky Way GeoJSON data") from exc
+    return rings
+
+
+def add_milky_way(group: Element, cache: Path, args: argparse.Namespace, scale: float, center: float, radius: float) -> None:
+    rings = load_milky_way(cache / "milkyway" / "mw.json")
+    flat = [point for ring in rings for point in ring]
+    coordinates = SkyCoord(ra=[p[0] for p in flat] * u.deg, dec=[p[1] for p in flat] * u.deg,
+                           frame=FK5(equinox=Time("J2000"))).transform_to(FK5(equinox=Time(f"J{args.epoch_year}")))
+    transformed = iter(zip(coordinates.ra.deg, coordinates.dec.deg))
+    overlay = SubElement(group, "g", {"id": "star-chart-milky-way", "fill": "none", "stroke": "#000",
+                                     "stroke-width": f"{args.milky_way_width:.4f}"})
+    for ring in rings:
+        vertices = [next(transformed) for _ in ring]
+        commands = []
+        for first, second in zip(vertices, vertices[1:]):
+            inside = [dec >= args.range_declination if args.center == "north" else dec <= args.range_declination for _, dec in (first, second)]
+            if not any(inside): continue
+            endpoints = [projected_xy(ra / 15, dec, args, scale, center) for ra, dec in (first, second)]
+            clipped = clip_segment_to_circle(*endpoints, (center, center), radius)
+            if clipped:
+                commands.append(points_to_path(clipped, closed=False))
+        if commands: SubElement(overlay, "path", {"d": " ".join(commands)})
 
 
 def default_data_cache() -> Path:
@@ -336,9 +385,13 @@ def label_offset(position: str, radial: float, tangential: float) -> tuple[float
     return ux * radial - uy * tangential, uy * radial + ux * tangential, "middle"
 
 
-def bbox_for_text(x: float, y: float, text: str, size: float) -> tuple[float, float, float, float]:
+def bbox_for_text(x: float, y: float, text: str, size: float, rotation: float = 0.0) -> tuple[float, float, float, float]:
     width = max(size * 0.55 * len(text), size * 0.6)
-    return x - width / 2, y - size, x + width / 2, y + size * 0.25
+    angle = math.radians(rotation)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    corners = [(x + dx * cosine - dy * sine, y + dx * sine + dy * cosine)
+               for dx in (-width / 2, width / 2) for dy in (-size, size * 0.25)]
+    return min(p[0] for p in corners), min(p[1] for p in corners), max(p[0] for p in corners), max(p[1] for p in corners)
 
 
 def overlaps(first: tuple[float, float, float, float], second: tuple[float, float, float, float]) -> bool:
@@ -387,6 +440,16 @@ def render_star_chart(args: argparse.Namespace) -> tuple[bytes, RenderStats]:
     root = Element(f"{{{SVG_NS}}}svg", {"width": f"{total:.4f}mm", "height": f"{total:.4f}mm", "viewBox": f"0 0 {total:.4f} {total:.4f}"})
     defs = SubElement(root, "defs"); clip = SubElement(defs, "clipPath", {"id": "chart-clip"}); SubElement(clip, "circle", {"cx": str(center), "cy": str(center), "r": str(radius)})
     group = SubElement(root, "g", {"clip-path": "url(#chart-clip)"})
+    if getattr(args, "milky_way", False): add_milky_way(group, cache, args, radius_scale, center, radius)
+    for curve in ("equator", "ecliptic"):
+        if not getattr(args, curve, False): continue
+        points = []
+        for index in range(1440):
+            longitude = index / 4.0
+            dec, ra = (0.0, longitude) if curve == "equator" else ecliptic_to_equatorial(longitude)
+            points.append(projected_xy(ra / 15.0, dec, args, radius_scale, center))
+        SubElement(group, "path", {"id": f"star-chart-{curve}", "d": points_to_path(points, closed=True),
+                                  "fill": "none", "stroke": "#000", "stroke-width": f"{getattr(args, curve + '_width', 0.1):.4f}"})
     stats, positions, selected = RenderStats(), {}, []
     identifiers = star_index(stars)
     # HYG includes the Sun as a convenience row; it is not a fixed star-chart
@@ -432,9 +495,13 @@ def render_star_chart(args: argparse.Namespace) -> tuple[bytes, RenderStats]:
     def add_label(text: str, x: float, y: float, font: str, size: float, preferred: str, radial: float, tangential: float) -> bool:
         candidates = [preferred] + [item for item in POSITIONS if item != preferred] if args.avoid_label_overlap else [preferred]
         for candidate in candidates:
-            dx, dy, anchor = label_offset(candidate, radial, tangential); box = bbox_for_text(x + dx, y + dy, text, size)
+            dx, dy, anchor = label_offset(candidate, radial, tangential)
+            label_x, label_y = x + dx, y + dy
+            # SVG text's local top is -Y: turn it toward the circumference.
+            rotation = math.degrees(math.atan2(label_x - center, center - label_y)) if (label_x, label_y) != (center, center) else 0.0
+            box = bbox_for_text(label_x, label_y, text, size, rotation)
             if args.avoid_label_overlap and any(overlaps(box, other) for other in occupied): continue
-            SubElement(group, "text", {"x": f"{x+dx:.4f}", "y": f"{y+dy:.4f}", "font-family": font, "font-size": f"{size:.4f}", "text-anchor": anchor, "fill": "#000"}).text = text
+            SubElement(group, "text", {"x": f"{label_x:.4f}", "y": f"{label_y:.4f}", "transform": f"rotate({rotation:.4f} {label_x:.4f} {label_y:.4f})", "font-family": font, "font-size": f"{size:.4f}", "text-anchor": anchor, "fill": "#000"}).text = text
             occupied.append(box); return True
         stats.hidden_labels += 1; return False
     if args.show_star_names:
@@ -463,6 +530,10 @@ def render_star_chart(args: argparse.Namespace) -> tuple[bytes, RenderStats]:
 
 
 def validate_star_args(args: argparse.Namespace) -> None:
+    for curve in ("equator", "ecliptic", "milky_way"):
+        width = getattr(args, curve + "_width", 0.1)
+        if not math.isfinite(width) or width < 0:
+            raise ValueError(f"{curve.replace('_', '-')}-width must be finite and non-negative")
     if not -90 <= args.range_declination <= 90: raise ValueError("range-declination must be within [-90, 90]")
     if args.diameter <= 0: raise ValueError("diameter must be positive")
     if args.magnitude_levels <= 0: raise ValueError("magnitude-levels must be positive")
@@ -487,6 +558,28 @@ def _download_from_sources(urls: Iterable[str], destination: Path) -> tuple[str,
         except (OSError, urllib.error.URLError) as exc:
             destination.unlink(missing_ok=True); errors.append(f"{url}: {exc}")
     raise OSError("All HYG download sources failed:\n" + "\n".join(errors))
+
+
+def download_milky_way_data(cache: Path, progress=None) -> dict:
+    """Download only the small outline dataset, preserving existing star caches."""
+    progress = progress or (lambda _message: None)
+    progress("Downloading Milky Way outlines...")
+    with tempfile.TemporaryDirectory() as directory:
+        stage = Path(directory)
+        hashes = {f"milkyway/{name}": _download(f"{MILKY_WAY_BASE_URL}/{source}", stage / name)
+                  for name, source in MILKY_WAY_FILES.items()}
+        load_milky_way(stage / "mw.json")
+        manifest_path = cache / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+        target = cache / "milkyway"; target.mkdir(parents=True, exist_ok=True)
+        for name in MILKY_WAY_FILES: shutil.copy2(stage / name, target / name)
+        manifest.setdefault("files", {}).update(hashes)
+        manifest["milky_way"] = {"version": MILKY_WAY_VERSION, "url": f"{MILKY_WAY_BASE_URL}/data/mw.json",
+            "source": "Milky Way Outline Catalog, Jose R. Vieira; GeoJSON conversion by Olaf Frohn (d3-celestial)",
+            "license": "d3-celestial BSD-3-Clause; upstream attribution preserved in milkyway/SOURCE.md",
+            "downloaded_at": datetime.now(timezone.utc).isoformat()}
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest
 
 
 def download_star_data(cache: Path, progress=None) -> dict:
@@ -515,13 +608,16 @@ def download_star_data(cache: Path, progress=None) -> dict:
                 target = extracted / relative; target.parent.mkdir(parents=True, exist_ok=True)
                 if not member.is_dir(): target.write_bytes(bundle.read(member))
         if not any(extracted.glob("skycultures/*/index.json")): raise ValueError("Downloaded Stellarium archive contains no sky cultures")
+        milky_manifest = download_milky_way_data(stage, progress)
+        (stage / "manifest.json").unlink()
         file_hashes = {str(path.relative_to(stage)).replace("\\", "/"): hashlib.sha256(path.read_bytes()).hexdigest() for path in stage.rglob("*") if path.is_file()}
         manifest = {"downloaded_at": datetime.now(timezone.utc).isoformat(), "files": file_hashes,
+            "milky_way": milky_manifest["milky_way"],
             "hyg": {"version": HYG_VERSION, "url": hyg_url, "sha256": hyg_hash, "license": "CC BY-SA 4.0"},
             "stellarium": {"version": STELLARIUM_VERSION, "url": STELLARIUM_URL, "sha256": stellarium_hash,
                 "license": "GPL-2.0 project; individual sky-culture licenses are preserved in the cache"}}
         cache.mkdir(parents=True, exist_ok=True)
-        for name in ("hyg", "stellarium"):
+        for name in ("hyg", "stellarium", "milkyway"):
             target = cache / name; shutil.rmtree(target, ignore_errors=True); shutil.move(str(stage / name), str(target))
         load_po_translations.cache_clear()
         (cache / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
